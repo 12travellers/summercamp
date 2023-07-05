@@ -1,26 +1,35 @@
-import model
-import pytorch
+
+import torch
 import pymotionlib
+from pymotionlib import BVHLoader
 
 
 
 
-def read_motion_data (file_name_list):
-    bvh_list = []
-    for file_name in file_name_list:
-        bvh_list.append(BVHLoader.load(file_name)) # BVHLoader.load会将bvh读进来，并转为MotionData类
-    return bvh_list
 
 
 
-if __name__ == 'main':
-    motions = read_motion_data ([".\walk1_subject5.bvh"])
+
+if __name__ == '__main__':
+    device =torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    output_path = "./output"
+    bvh = BVHLoader.load (["./walk1_subject5.bvh"])
+    print(bvh._joint_position)
+    '''
     
     data_loader = 
     
-    output_path = 
     
-    epoch = 
-    for in range(epoch):
-        
-        
+    iteration = 10
+    
+    checkpoint = torch.load(path)
+    model.load_state_dict(checkpoint['model'])
+    epoch = checkpoint(['epoch'])
+
+    while (epoch < iteration):
+        epoch += 1        
+        state = {'model': model.state_dict(), \
+                 'epoch': epoch}
+        torch.save(state, output_path+'/final_model.pth')
+    
+    '''
