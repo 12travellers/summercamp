@@ -15,10 +15,13 @@ class VAE_encoder (torch.nn.Module):
         self.l2 = torch.nn.Linear (h1, h2)
         
         self.mull = torch.nn.Linear (h2, latent_size)
-        self.sigmall = torch.nn.Linear (h2, latent_size,)
+        self.sigmall = torch.nn.Linear (h2, latent_size)
         
     def forward (self, motions, angles = torch.zeros(1, 0)):
+        if (0 == self.used_angles):
+            angles = torch.zeros(motions.shape[0], 0)
         input = torch.concat ([motions, angles], dim = 1)
+        input = input.to(torch.float32)
         assert (input.shape[1] == self.input_size)
         input = torch.nn.functional.elu (self.l1 (input))
         input = torch.nn.functional.elu (self.l2 (input))
@@ -32,10 +35,11 @@ class VAE_decoder (torch.nn.Module):
         self.motion_size = motion_size
         self.latent_size = latent_size
         self.moe = moe
-        self.used_angled = used_angles
+        self.used_angles = used_angles
         self.input_size = (motion_size + used_angles) * (used_motions - 1) + latent_size
         
         self.l1, self.l2 = [], []
+        
         for i in range(self.moe):
             self.l1.append (torch.nn.Linear (self.input_size, h1))
             self.l2.append (torch.nn.Linear (h1, h2))
@@ -47,18 +51,23 @@ class VAE_decoder (torch.nn.Module):
         
         
     def forward (self, motions, z, angles = torch.zeros(1, 0)):
-        input = torch.concatenate ([motions, angles, z], dim = 1)
+        if (0 == self.used_angles):
+            angles = torch.zeros(motions.shape[0], 0)
+    
+        input = torch.concatenate ([motions, z, angles], dim = 1)
+        input = input.to(torch.float32)
+    #    print(motions.shape, z.shape, self.input_size)
         assert (input.shape[1] == self.input_size)
         
         
-        output = torch.zeros (input.shape)
-        inputs = torch.reshape (input, [1] + input.shape)
-        inputs = torch.repeat_interleave(inputs, self.moe, dim = 0)
+        output = torch.zeros (self.h2)
+        inputs = torch.reshape (input, [1] + list(input.shape))
+        inputs = torch.repeat_interleave (inputs, self.moe, dim = 0)
         
         for i in range(self.moe):
-            inputs[i] = torch.nn.functional.elu (self.l1[i] (inputs[i]))
-            inputs[i] = torch.nn.functional.elu (self.l2[i] (inputs[i]))
-            output = output + self.para[i] * inputs[i]
+            tmp = torch.nn.functional.elu (self.l1[i] (inputs[i]))
+            tmp = torch.nn.functional.elu (self.l2[i] (tmp))
+            output = output + self.para[i] * tmp
         outupt = output / torch.norm (self.para)
         
         output = torch.nn.functional.elu (self.l3 (\
@@ -79,7 +88,8 @@ class VAE (torch.nn.Module):
     def forward(self, motions, angles = torch.zeros(1, 0)):
         mu, sigma = self.encoder (motions, angles)
         z = mu + torch.randn_like (sigma) * sigma
-        re_build = self.decoder (motions[:, :-1], angles[:, :-1], z)
+        
+        re_build = self.decoder (motions[:, :-self.encoder.motion_size], z, angles[:, :-self.encoder.used_angles])
         return re_build, mu, sigma
     
     

@@ -3,7 +3,7 @@ import torch
 import pymotionlib
 from pymotionlib import BVHLoader
 import numpy as np
-import tqdm
+from tqdm import tqdm
 import random
 
 from torch.utils.data import DataLoader
@@ -12,22 +12,26 @@ from sklearn.model_selection import train_test_split
 output_path = "./output"
 data_path = "./walk1_subject5.bvh"
 used_angles = 0
-used_motions = 1
+used_motions = 2
 clip_size = 8
 batch_size = 32
 learning_rate = 1e-4
 beta_VAE = 0.2
-
+latent_size = 256
 
 def build_data_set (data):
-    dataset = torch.zeros ([0, clip_size, data.shape[1]])
+    dataset = []
+    
     for i in range (data.shape[0] - clip_size):
-        dataset.append (data[i:i+clip_size, :])
-    return dataset
+        datapiece = data[i:i+clip_size, :]
+        datapiece = datapiece.reshape ([1] + list(datapiece.shape))
+        dataset.append (torch.tensor(datapiece))
+    return torch.concat (dataset, dim = 0)
 
 
 if __name__ == '__main__':
-    device =torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print ("train model on device:" + str(device))
 
     
     bvh = BVHLoader.load (data_path)
@@ -40,19 +44,26 @@ if __name__ == '__main__':
     
     train_motions, test_motions = train_test_split(motions, test_size = 0.1)
     
-    encoder = model.VAE_encoder (motion_size, used_motions, 512, 256, 256, used_angles)
+    encoder = model.VAE_encoder (motion_size, used_motions, 512, 256, latent_size, used_angles)
     decoder = model.VAE_decoder (motion_size, used_motions, latent_size, 512, 256, 3, used_angles)
     
     VAE = model.VAE(encoder, decoder)
-    optimizer = torch.optim.Adam(model.parameters(), lr = learning_rate)
+    optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
     
     iteration = 100
+    epoch = 0
     p0_iteration, p1_iteration = 40, 20
     
-    checkpoint = torch.load (output_path+'/final_model.pth')
-    VAE.load_state_dict (checkpoint['model'])
-    epoch = checkpoint (['epoch'])
-    loss_history = checkpoint (['loss_history'])
+    
+    try:
+        checkpoint = torch.load (output_path + '/final_model.pth')
+        VAE.load_state_dict (checkpoint['model'])
+        epoch = checkpoint (['epoch'])
+        loss_history = checkpoint (['loss_history'])
+        print ("loading model from " + output_path + '/final_model.pth')
+    except:
+        print ("no training history found... rebuild another model...")
+    
     
     train_loader = torch.utils.data.DataLoader(\
         dataset = build_data_set (train_motions),\
@@ -62,6 +73,7 @@ if __name__ == '__main__':
         dataset = build_data_set (test_motions),\
         batch_size = batch_size,\
         shuffle=True)
+    
     loss_BCE = torch.nn.BCELoss(reduction = 'sum')
     loss_KLD = lambda mu,sigma: -0.5 * torch.sum(1 + torch.log(sigma**2) - mu.pow(2) - sigma**2)
 
@@ -77,8 +89,8 @@ if __name__ == '__main__':
         t = tqdm(train_loader, desc = f'[train]epoch:{epoch}')
         train_loss, train_nsample = 0, 0
          
-        for step, motions in train_loader:
-            x = [motions [:, 0, :]
+        for motions in train_loader:
+            x = motions [:, 0, :]
             for i in range (1, clip_size):
                 re_x, mu, sigma = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                 
