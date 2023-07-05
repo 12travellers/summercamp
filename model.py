@@ -17,7 +17,7 @@ class VAE_encoder (torch.nn.Module):
         self.mull = torch.nn.Linear (h2, latent_size)
         self.sigmall = torch.nn.Linear (h2, latent_size,)
         
-    def forward (self, motions, angles = np.zeros(0)):
+    def forward (self, motions, angles = torch.zeros(1, 0)):
         input = torch.concat ([motions, angles], dim = 1)
         assert (input.shape[1] == self.input_size)
         input = torch.nn.functional.elu (self.l1 (input))
@@ -35,9 +35,10 @@ class VAE_decoder (torch.nn.Module):
         self.used_angled = used_angles
         self.input_size = (motion_size + used_angles) * (used_motions - 1) + latent_size
         
+        self.l1, self.l2 = [], []
         for i in range(self.moe):
-            self.l1[i] = torch.nn.Linear (self.input_size, h1)
-            self.l2[i] = torch.nn.Linear (h1, h2)
+            self.l1.append (torch.nn.Linear (self.input_size, h1))
+            self.l2.append (torch.nn.Linear (h1, h2))
         self.para = torch.ones (self.moe)
 
         self.l3 = torch.nn.Linear (self.input_size + latent_size, h1)
@@ -45,7 +46,7 @@ class VAE_decoder (torch.nn.Module):
         self.l5 = torch.nn.Linear (h2 + latent_size, motion_size)
         
         
-    def forward (self, motions, z, angles = np.zeros(0)):
+    def forward (self, motions, z, angles = torch.zeros(1, 0)):
         input = torch.concatenate ([motions, angles, z], dim = 1)
         assert (input.shape[1] == self.input_size)
         
@@ -75,7 +76,7 @@ class VAE (torch.nn.Module):
         super (VAE, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
-    def forward(self, motions, angles):
+    def forward(self, motions, angles = torch.zeros(1, 0)):
         mu, sigma = self.encoder (motions, angles)
         z = mu + torch.randn_like (sigma) * sigma
         re_build = self.decoder (motions[:, :-1], angles[:, :-1], z)
