@@ -40,20 +40,21 @@ if __name__ == '__main__':
     motions = bvh._joint_rotation
     motions = motions.reshape (bvh.num_frames, -1) / (math.pi * 2)
     motions = motions + 0.5
-    motion_size = motions.shape [1]
     
     translation = bvh._joint_translation
     translation = motions.reshape (bvh.num_frames, -1) / area_width
     translation = translation + 0.5
     
-    
+    # motion_size = real_motion_size + root_position_size
+    motions = np.concatenate ([motions, translation [:, 0:3]], axis = 1)
+    motion_size = motions.shape [1]
     
     print("read " + str(motions.shape) + "motions from " + data_path)
     
     train_motions, test_motions = train_test_split(motions, test_size = 0.1)
     
-    encoder = model.VAE_encoder (motion_size, used_motions, 512, 256, latent_size, used_angles)
-    decoder = model.VAE_decoder (motion_size, used_motions, latent_size, 512, 256, 3, used_angles)
+    encoder = model.VAE_encoder (motion_size, used_motions, 256, 256, latent_size, used_angles)
+    decoder = model.VAE_decoder (motion_size, used_motions, latent_size, 256, 256, 3, used_angles)
     
     VAE = model.VAE(encoder, decoder)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
@@ -119,7 +120,7 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             
             train_loss += loss.item()
-            train_nsample += batch_size* (clip_size - 1)
+            train_nsample += batch_size * (clip_size - 1)
             t.set_postfix({'loss':train_loss/train_nsample})
             
         loss_history['train'].append(train_loss/train_nsample)

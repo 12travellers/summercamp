@@ -73,7 +73,6 @@ class VAE_decoder (torch.nn.Module):
             tmp = torch.nn.functional.elu (self.l3[i] (\
                 torch.concatenate ([tmp, z], dim = 1)))
             output = output + torch.mul (para[:, i:i+1], tmp)
-        output = output / torch.norm (para).to (torch.float32)
         
         return torch.sigmoid(output)            
         
