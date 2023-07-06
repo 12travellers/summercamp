@@ -3,6 +3,7 @@ import torch
 import pymotionlib
 from pymotionlib import BVHLoader
 import numpy as np
+import math
 from tqdm import tqdm
 import random
 
@@ -36,7 +37,8 @@ if __name__ == '__main__':
     
     bvh = BVHLoader.load (data_path)
     motions = bvh._joint_position
-    motions = motions.reshape (bvh.num_frames, -1)
+    motions = motions.reshape (bvh.num_frames, -1) / (math.pi * 2)
+    motions = motions + 0.5
     
     motion_size = motions.shape [1]
     
@@ -50,40 +52,42 @@ if __name__ == '__main__':
     VAE = model.VAE(encoder, decoder)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
     
-    iteration = 100
+    iteration = 10
     epoch = 0
-    p0_iteration, p1_iteration = 40, 20
+    p0_iteration, p1_iteration = 4, 2
+    loss_history = {'train':[], 'test':[]}
     
     
     try:
         checkpoint = torch.load (output_path + '/final_model.pth')
         VAE.load_state_dict (checkpoint['model'])
-        epoch = checkpoint (['epoch'])
-        loss_history = checkpoint (['loss_history'])
+        epoch = checkpoint ['epoch']
+        loss_history = checkpoint ['loss_history']
         print ("loading model from " + output_path + '/final_model.pth')
     except:
         print ("no training history found... rebuild another model...")
+        
     
     
     train_loader = torch.utils.data.DataLoader(\
         dataset = build_data_set (train_motions),\
         batch_size = batch_size,\
-        shuffle=True)
+        shuffle = True)
     test_loader = torch.utils.data.DataLoader(\
         dataset = build_data_set (test_motions),\
         batch_size = batch_size,\
-        shuffle=True)
+        shuffle = True)
     
     loss_BCE = torch.nn.BCELoss(reduction = 'sum')
     loss_KLD = lambda mu,sigma: -0.5 * torch.sum(1 + torch.log(sigma**2) - mu.pow(2) - sigma**2)
 
 
     while (epoch < iteration):
-        teacher_p = 1
+        teacher_p = 0
         if (epoch < p0_iteration):
             teacher_p = (p1_iteration - epoch) / (p1_iteration -p0_iteration)
-        else:
-            teacher_p = 0 
+        elif(epoch < p1_iteration):
+            teacher_p = 1
         epoch += 1 
         
         t = tqdm(train_loader, desc = f'[train]epoch:{epoch}')
@@ -94,14 +98,14 @@ if __name__ == '__main__':
             for i in range (1, clip_size):
                 re_x, mu, sigma = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                 
-                loss_re = loss_BCE(re_x, motions [:, i, :])
+                loss_re = loss_BCE(re_x.to (torch.float32), motions [:, i, :].to (torch.float32))
                 loss_norm = loss_KLD(mu, sigma)
                 loss = loss_re + beta_VAE * loss_norm
                 
-                for j in range(0, batch_size):
-                    if (random.random() < teacher_p):
-                        re_x [:, j, :] = motions [:, i, :]
-                x = re_x
+                if (random.random() < teacher_p):
+                    x = motions [:, i, :]
+                else:
+                    x = re_x
                 
             
             loss.backward()
@@ -116,7 +120,7 @@ if __name__ == '__main__':
         
         state = {'model': VAE.state_dict(),\
                  'epoch': epoch,\
-                 'loss_histort': loss_history}
+                 'loss_history': loss_history}
         torch.save(state, output_path+'/final_model.pth')
         print ("iteration %d/%d, train_loss: %f", epoch, iteration, train_loss/train_nsample)
         

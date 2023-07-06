@@ -38,16 +38,16 @@ class VAE_decoder (torch.nn.Module):
         self.used_angles = used_angles
         self.input_size = (motion_size + used_angles) * (used_motions - 1) + latent_size
         
-        self.l1, self.l2 = [], []
         
-        for i in range(self.moe):
-            self.l1.append (torch.nn.Linear (self.input_size, h1))
-            self.l2.append (torch.nn.Linear (h1, h2))
-        self.para = torch.ones (self.moe)
+        self.l1 = torch.nn.ModuleList([torch.nn.Linear(self.input_size, h1) for i in range(self.moe)])
+        self.l2 = torch.nn.ModuleList([torch.nn.Linear(h1 + latent_size, h2) for i in range(self.moe)])
+        self.l3 = torch.nn.ModuleList([torch.nn.Linear(h2 + latent_size, motion_size) for i in range(self.moe)])
 
-        self.l3 = torch.nn.Linear (self.input_size + latent_size, h1)
-        self.l4 = torch.nn.Linear (h1 + latent_size, h2)
-        self.l5 = torch.nn.Linear (h2 + latent_size, motion_size)
+        self.gate1 = torch.nn.Linear (self.input_size, h1)
+        self.gate2 = torch.nn.Linear (h1, h2)
+        self.gate3 = torch.nn.Linear (h2, self.moe)
+
+        
         
         
     def forward (self, motions, z, angles = torch.zeros(1, 0)):
@@ -60,23 +60,22 @@ class VAE_decoder (torch.nn.Module):
         assert (input.shape[1] == self.input_size)
         
         
-        output = torch.zeros (self.h2)
-        inputs = torch.reshape (input, [1] + list(input.shape))
-        inputs = torch.repeat_interleave (inputs, self.moe, dim = 0)
+        output = torch.zeros ([self.motion_size])
+        
+        para = torch.nn.functional.elu (self.gate1 (input)) 
+        para = torch.nn.functional.elu (self.gate2 (para)) 
+        para = torch.nn.functional.elu (self.gate3 (para)) 
         
         for i in range(self.moe):
-            tmp = torch.nn.functional.elu (self.l1[i] (inputs[i]))
-            tmp = torch.nn.functional.elu (self.l2[i] (tmp))
-            output = output + self.para[i] * tmp
-        outupt = output / torch.norm (self.para)
+            tmp = torch.nn.functional.elu (self.l1[i] (input))
+            tmp = torch.nn.functional.elu (self.l2[i] (\
+                torch.concatenate ([tmp, z], dim = 1)))
+            tmp = torch.nn.functional.elu (self.l3[i] (\
+                torch.concatenate ([tmp, z], dim = 1)))
+            output = output + torch.mul (para[:, i:i+1], tmp)
+        output = output / torch.norm (para).to (torch.float32)
         
-        output = torch.nn.functional.elu (self.l3 (\
-            torch.concatenate ([output, z], dim = 1)))
-        output = torch.nn.functional.elu (self.l4 (\
-            torch.concatenate ([output, z], dim = 1)))
-        output = torch.nn.functional.elu (self.l5 (\
-            torch.concatenate ([output, z], dim = 1)))
-        return output            
+        return torch.sigmoid(output)            
         
         
 
