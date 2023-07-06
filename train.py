@@ -19,6 +19,7 @@ batch_size = 32
 learning_rate = 1e-4
 beta_VAE = 0.2
 latent_size = 256
+area_width = 256
 
 def build_data_set (data):
     dataset = []
@@ -39,10 +40,13 @@ if __name__ == '__main__':
     motions = bvh._joint_rotation
     motions = motions.reshape (bvh.num_frames, -1) / (math.pi * 2)
     motions = motions + 0.5
-    print(motions)
-        
-    
     motion_size = motions.shape [1]
+    
+    translation = bvh._joint_translation
+    translation = motions.reshape (bvh.num_frames, -1) / area_width
+    translation = translation + 0.5
+    
+    
     
     print("read " + str(motions.shape) + "motions from " + data_path)
     
@@ -119,19 +123,14 @@ if __name__ == '__main__':
             t.set_postfix({'loss':train_loss/train_nsample})
             
         loss_history['train'].append(train_loss/train_nsample)
-        
-        state = {'model': VAE.state_dict(),\
-                 'epoch': epoch,\
-                 'loss_history': loss_history}
-        torch.save(state, output_path+'/final_model.pth')
-        print ("iteration %d/%d, train_loss: %f", epoch, iteration, train_loss/train_nsample)
+
         
         
-        if (epoch % 10 == 0 and epoch > p0_iteration):
+        if (epoch % 3 == 0 and epoch > p0_iteration):
             
             test_loss, test_nsample = 0, 0
             
-            for step, motions in test_loader:
+            for motions in test_loader:
                 x = motions [:, 0, :]
                 for i in range (1, clip_size):
                     re_x, mu, sigma = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
@@ -150,6 +149,11 @@ if __name__ == '__main__':
                 t.set_postfix ({'loss':test_loss/test_nsample})  
             print ("iteration %d/%d, test_loss: %f", epoch, iteration, test_loss/test_nsample)
         
-        
+                
+        state = {'model': VAE.state_dict(),\
+                 'epoch': epoch,\
+                 'loss_history': loss_history}
+        torch.save(state, output_path+'/final_model.pth')
+        print ("iteration %d/%d, train_loss: %f", epoch, iteration, train_loss/train_nsample)
     
     
