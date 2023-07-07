@@ -16,10 +16,14 @@ used_angles = 0
 used_motions = 2
 clip_size = 8
 batch_size = 32
-learning_rate = 1e-6
-beta_VAE = 0.01
-beta_moe = 0.1
-latent_size = 256
+learning_rate = 4e-4
+beta_VAE = 0.5
+beta_para = 0.1
+beta_moe = 0.2
+h1 = 256
+h2 = 128
+moemoechu = 4
+latent_size = 128
 area_width = 2
 
 def build_data_set (data):
@@ -56,8 +60,8 @@ if __name__ == '__main__':
     
     train_motions, test_motions = train_test_split(motions, test_size = 0.1)
     
-    encoder = model.VAE_encoder (motion_size, used_motions, 256, 256, latent_size, used_angles)
-    decoder = model.VAE_decoder (motion_size, used_motions, latent_size, 256, 256, 4, used_angles)
+    encoder = model.VAE_encoder (motion_size, used_motions, h1, h2, latent_size, used_angles)
+    decoder = model.VAE_decoder (motion_size, used_motions, latent_size, h1, h2, moemoechu, used_angles)
     
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
@@ -91,7 +95,6 @@ if __name__ == '__main__':
     loss_MSE = torch.nn.MSELoss(reduction = 'sum')
     loss_KLD = lambda mu,sigma: -0.5 * torch.sum(1 + torch.log(sigma**2) - mu.pow(2) - sigma**2)
 
-
     while (epoch < iteration):
         teacher_p = 0
         if (epoch < p0_iteration):
@@ -102,19 +105,28 @@ if __name__ == '__main__':
         
         t = tqdm (train_loader, desc = f'[train]epoch:{epoch}')
         train_loss, train_nsample = 0, 0
-         
+        
         for motions in train_loader:
             x = motions [:, 0, :]
             for i in range (1, clip_size):
                 re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                     
                 loss_re = loss_MSE(re_x, motions [:, i, :].to(torch.float32))
-                loss_moe = 0
-                for moemoe in moe_output:
-                    loss_moe += loss_MSE(moemoe, motions [:, i, :].to(torch.float32))
+                loss_moe, loss_para = 0, 0
+                
+                moemoe, moemoepara = moe_output
+                for j in range(moemoechu):
+                    loss_moe += loss_MSE(torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :]), \
+                        torch.mul(moemoepara[:, :, j:j+1], motions [:, i, :].to(torch.float32)))
+                
+                '''
+                for moemoe, moemoepara in moe_output:
+                    for j in range(batch_size):
+                        loss_moe += moemoepara[j] * loss_MSE(moemoe[j], motions [j, i, :].to(torch.float32))
+                    loss_para += 0
+                '''
                 loss_norm = loss_KLD(mu, sigma)
-                loss = loss_re + beta_VAE * loss_norm + beta_moe * loss_moe
-                loss *= 1000
+                loss = loss_re + beta_VAE * loss_norm + beta_moe * loss_moe + beta_para * loss_para
                 
                 if (random.random() < teacher_p):
                     x = motions [:, i, :]
@@ -144,12 +156,15 @@ if __name__ == '__main__':
                     re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                     
                     loss_re = loss_MSE(re_x, motions [:, i, :].to(torch.float32))
-                    loss_moe = 0
-                    for moemoe in moe_output:
-                        loss_moe += loss_MSE(moemoe, motions [:, i, :].to(torch.float32))
+                    loss_moe, loss_para = 0, 0
+                    
+                    moemoe, moemoepara = moe_output
+                    for j in range(moemoechu):
+                        loss_moe += loss_MSE(torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :]), \
+                            torch.mul(moemoepara[:, :, j:j+1], motions [:, i, :].to(torch.float32)))
                     loss_norm = loss_KLD(mu, sigma)
-                    loss = loss_re + beta_VAE * loss_norm + beta_moe * loss_moe
-                    loss *= 1000
+                    loss = loss_re + beta_VAE * loss_norm + beta_moe * loss_moe + beta_para * loss_para
+                
                     
                     x = re_x
                 
@@ -158,11 +173,11 @@ if __name__ == '__main__':
                 t.set_postfix ({'loss':test_loss/test_nsample})  
             print ("iteration %d/%d, test_loss: %f", epoch, iteration, test_loss/test_nsample)
         
-                
-    state = {'model': VAE.state_dict(),\
-                'epoch': epoch,\
-                'loss_history': loss_history}
-    torch.save(state, output_path+'/final_model.pth')
-    print ("iteration %d/%d, train_loss: %f", epoch, iteration, train_loss/train_nsample)
-    
+                    
+        state = {'model': VAE.state_dict(),\
+                    'epoch': epoch,\
+                    'loss_history': loss_history}
+        torch.save(state, output_path+'/final_model.pth')
+        print ("iteration %d/%d, train_loss: %f", epoch, iteration, train_loss/train_nsample)
+        
     

@@ -16,10 +16,13 @@ used_angles = 0
 used_motions = 2
 clip_size = 8
 batch_size = 32
-learning_rate = 1e-6
+learning_rate = 1e-5
 beta_VAE = 0.01
 beta_moe = 0.1
-latent_size = 256
+h1 = 256
+h2 = 128
+moemoechu = 4
+latent_size = 128
 area_width = 2
 
 def build_data_set (data):
@@ -53,9 +56,9 @@ if __name__ == '__main__':
     motion_size = motions.shape [1]
     
 
-    encoder = model.VAE_encoder (motion_size, used_motions, 256, 256, latent_size, used_angles)
-    decoder = model.VAE_decoder (motion_size, used_motions, latent_size, 256, 256, 4, used_angles)
-    
+    encoder = model.VAE_encoder (motion_size, used_motions, h1, h2, latent_size, used_angles)
+    decoder = model.VAE_decoder (motion_size, used_motions, latent_size, h1, h2, moemoechu, used_angles)
+     
     VAE = model.VAE(encoder, decoder)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
   
