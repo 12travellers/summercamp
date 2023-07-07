@@ -17,7 +17,7 @@ used_motions = 2
 clip_size = 8
 batch_size = 32
 learning_rate = 1e-4
-beta_VAE = 0.2
+beta_VAE = 0.8
 latent_size = 256
 area_width = 256
 
@@ -127,7 +127,7 @@ if __name__ == '__main__':
 
         
         
-        if (epoch % 3 == 0 and epoch > p0_iteration):
+        if (epoch % 5 == 0 and epoch > p0_iteration):
             
             test_loss, test_nsample = 0, 0
             
