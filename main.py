@@ -17,7 +17,7 @@ used_motions = 2
 clip_size = 8
 batch_size = 32
 learning_rate = 1e-4
-beta_VAE = 0.2
+beta_VAE = 0.4
 latent_size = 256
 area_width = 256
 
@@ -77,8 +77,7 @@ if __name__ == '__main__':
     while anime_time > 0:
         anime_time -= 1
         z = torch.randn(1, latent_size)
-        z.reshape ([1]+list(z.shape))
-
+        
         re_x = VAE.decoder (torch.concat ([x], dim = 1), z)
         trans = np.zeros(re_x[0, :-3].shape[0]//4*3)
         trans [0:3] = re_x [0, -3:].detach().numpy()

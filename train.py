@@ -17,7 +17,7 @@ used_motions = 2
 clip_size = 8
 batch_size = 32
 learning_rate = 1e-4
-beta_VAE = 0.8
+beta_VAE = 0.4
 latent_size = 256
 area_width = 256
 
@@ -140,10 +140,7 @@ if __name__ == '__main__':
                     loss_norm = loss_KLD(mu, sigma)
                     loss = loss_re + beta_VAE * loss_norm
                     
-                    if (random.random() < teacher_p):
-                        x = motions [:, i, :]
-                    else:
-                        x = re_x
+                    x = re_x
                 
                 test_loss += loss.item()
                 test_nsample += batch_size* (clip_size - 1)

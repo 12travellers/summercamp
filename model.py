@@ -56,7 +56,6 @@ class VAE_decoder (torch.nn.Module):
     
         input = torch.concatenate ([motions, z, angles], dim = 1)
         input = input.to(torch.float32)
-    #    print(motions.shape, z.shape, self.input_size)
         assert (input.shape[1] == self.input_size)
         
         
@@ -64,7 +63,7 @@ class VAE_decoder (torch.nn.Module):
         
         para = torch.nn.functional.elu (self.gate1 (input)) 
         para = torch.nn.functional.elu (self.gate2 (para)) 
-        para = torch.nn.functional.elu (self.gate3 (para)) 
+        para = torch.softmax (self.gate3 (para), dim = 0) 
         
         for i in range(self.moe):
             tmp = torch.nn.functional.elu (self.l1[i] (input))
@@ -85,9 +84,12 @@ class VAE (torch.nn.Module):
         self.decoder = decoder
     def forward(self, motions, angles = torch.zeros(1, 0)):
         mu, sigma = self.encoder (motions, angles)
+        
         z = mu + torch.randn_like (sigma) * sigma
         
-        re_build = self.decoder (motions[:, :-self.encoder.motion_size], z, angles[:, :-self.encoder.used_angles])
+        re_build = self.decoder (motions[:, :-self.encoder.motion_size],\
+                                 z,\
+                                 angles[:, :-self.encoder.used_angles])
         return re_build, mu, sigma
     
     
