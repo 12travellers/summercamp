@@ -42,8 +42,6 @@ if __name__ == '__main__':
     motions = motions.reshape (bvh.num_frames, -1) / (math.pi * 2)
     motions = motions + 0.5
     
-
-    
     translation = bvh._joint_translation
     translation = motions.reshape (bvh.num_frames, -1) / area_width
     translation = translation + 0.5
