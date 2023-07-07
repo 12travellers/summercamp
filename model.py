@@ -18,9 +18,10 @@ class VAE_encoder (torch.nn.Module):
         self.sigmall = torch.nn.Linear (h2, latent_size)
         
     def forward (self, motions, angles = torch.zeros(1, 0)):
-        if (0 == self.used_angles):
-            angles = torch.zeros(motions.shape[0], 0)
-        input = torch.concat ([motions, angles], dim = 1)
+        if (self.used_angles > 0):
+            input = torch.concat ([motions, angles], dim = 1)
+        else:
+            input = motions
         input = input.to(torch.float32)
         assert (input.shape[1] == self.input_size)
         input = torch.nn.functional.elu (self.l1 (input))
@@ -51,29 +52,35 @@ class VAE_decoder (torch.nn.Module):
         
         
     def forward (self, motions, z, angles = torch.zeros(1, 0)):
-        if (0 == self.used_angles):
-            angles = torch.zeros(motions.shape[0], 0)
-    
-        input = torch.concatenate ([motions, z, angles], dim = 1)
+        if (self.used_angles > 0):
+            input = torch.concatenate ([motions, z, angles], dim = 1)
+        else:
+            input = torch.concatenate ([motions, z], dim = 1)
         input = input.to(torch.float32)
         assert (input.shape[1] == self.input_size)
         
         
-        output = torch.zeros ([self.motion_size])
+        output = None
         
         para = torch.nn.functional.elu (self.gate1 (input)) 
         para = torch.nn.functional.elu (self.gate2 (para)) 
         para = torch.softmax (self.gate3 (para), dim = 0) 
         
+        moe_output = []
         for i in range(self.moe):
             tmp = torch.nn.functional.elu (self.l1[i] (input))
             tmp = torch.nn.functional.elu (self.l2[i] (\
                 torch.concatenate ([tmp, z], dim = 1)))
             tmp = torch.nn.functional.elu (self.l3[i] (\
                 torch.concatenate ([tmp, z], dim = 1)))
-            output = output + torch.mul (para[:, i:i+1], tmp)
+            
+            moe_output.append (torch.sigmoid (tmp))
+            if (output == None):
+                output = torch.mul (para[:, i:i+1], tmp)
+            else:
+                output = output + torch.mul (para[:, i:i+1], tmp)
         
-        return torch.sigmoid(output)            
+        return torch.sigmoid(output), moe_output 
         
         
 
@@ -87,10 +94,10 @@ class VAE (torch.nn.Module):
         
         z = mu + torch.randn_like (sigma) * sigma
         
-        re_build = self.decoder (motions[:, :-self.encoder.motion_size],\
+        re_build, moe_output = self.decoder (motions[:, :-self.encoder.motion_size],\
                                  z,\
                                  angles[:, :-self.encoder.used_angles])
-        return re_build, mu, sigma
+        return re_build, mu, sigma, moe_output
     
     
 if __name__ == '__main__':
