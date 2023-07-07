@@ -17,7 +17,7 @@ used_motions = 2
 clip_size = 8
 batch_size = 32
 learning_rate = 1e-4
-beta_VAE = 0.4
+beta_VAE = 1
 latent_size = 256
 area_width = 256
 
@@ -40,6 +40,13 @@ if __name__ == '__main__':
     motions = bvh._joint_rotation
     motions = motions.reshape (bvh.num_frames, -1) / (math.pi * 2)
     motions = motions + 0.5
+    
+    max0 = -100
+    for i in motions:
+        for j in i:
+            max0 = max (max0, j)
+    print(max0)
+    exit(0)
     
     translation = bvh._joint_translation
     translation = motions.reshape (bvh.num_frames, -1) / area_width
@@ -83,7 +90,7 @@ if __name__ == '__main__':
     test_loader = torch.utils.data.DataLoader(\
         dataset = build_data_set (test_motions),\
         batch_size = batch_size,\
-        shuffle = True)
+        shuffle = False)
     
     loss_MSE = torch.nn.MSELoss(reduction = 'sum')
     loss_KLD = lambda mu,sigma: -0.5 * torch.sum(1 + torch.log(sigma**2) - mu.pow(2) - sigma**2)
@@ -92,12 +99,12 @@ if __name__ == '__main__':
     while (epoch < iteration):
         teacher_p = 0
         if (epoch < p0_iteration):
-            teacher_p = (p1_iteration - epoch) / (p1_iteration -p0_iteration)
+            teacher_p = (p1_iteration - epoch) / (p1_iteration - p0_iteration)
         elif(epoch < p1_iteration):
             teacher_p = 1
         epoch += 1 
         
-        t = tqdm(train_loader, desc = f'[train]epoch:{epoch}')
+        t = tqdm (train_loader, desc = f'[train]epoch:{epoch}')
         train_loss, train_nsample = 0, 0
          
         for motions in train_loader:
@@ -106,7 +113,7 @@ if __name__ == '__main__':
                 re_x, mu, sigma = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                 
                 loss_re = loss_MSE(re_x.to (torch.float32), motions [:, i, :].to (torch.float32))
-                loss_norm = loss_KLD(mu, sigma)
+                loss_norm = loss_KLD (mu, sigma)
                 loss = loss_re + beta_VAE * loss_norm
                 
                 if (random.random() < teacher_p):

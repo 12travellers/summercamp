@@ -83,8 +83,8 @@ if __name__ == '__main__':
         trans [0:3] = re_x [0, -3:].detach().numpy()
     
         
-        bvh.append_trans_rotation (trans.reshape([1, -1, 3]),\
-            re_x[0, :-3].reshape([1, -1, 4]).detach().numpy())
+        bvh.append_trans_rotation ((trans.reshape([1, -1, 3]) - 0.5) * math.pi*2,\
+            (re_x[0, :-3].reshape([1, -1, 4]).detach().numpy() - 0.5) * area_width)
         
         x = re_x
      
