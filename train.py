@@ -16,8 +16,8 @@ used_angles = 0
 used_motions = 2
 clip_size = 8
 batch_size = 32
-learning_rate = 2e-6
-beta_VAE = 0.006
+learning_rate = 1e-6
+beta_VAE = 0.01
 beta_moe = 0.1
 latent_size = 256
 area_width = 2
@@ -59,14 +59,14 @@ if __name__ == '__main__':
     train_motions, test_motions = train_test_split(motions, test_size = 0.1)
     
     encoder = model.VAE_encoder (motion_size, used_motions, 256, 256, latent_size, used_angles)
-    decoder = model.VAE_decoder (motion_size, used_motions, latent_size, 256, 256, 3, used_angles)
+    decoder = model.VAE_decoder (motion_size, used_motions, latent_size, 256, 256, 4, used_angles)
     
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
     
-    iteration = 12
+    iteration = 40
     epoch = 0
-    p0_iteration, p1_iteration = 8, 3
+    p0_iteration, p1_iteration = 20, 10
     loss_history = {'train':[], 'test':[]}
     
     
@@ -161,10 +161,10 @@ if __name__ == '__main__':
             print ("iteration %d/%d, test_loss: %f", epoch, iteration, test_loss/test_nsample)
         
                 
-        state = {'model': VAE.state_dict(),\
-                 'epoch': epoch,\
-                 'loss_history': loss_history}
-        torch.save(state, output_path+'/final_model.pth')
-        print ("iteration %d/%d, train_loss: %f", epoch, iteration, train_loss/train_nsample)
+    state = {'model': VAE.state_dict(),\
+                'epoch': epoch,\
+                'loss_history': loss_history}
+    torch.save(state, output_path+'/final_model.pth')
+    print ("iteration %d/%d, train_loss: %f", epoch, iteration, train_loss/train_nsample)
     
     

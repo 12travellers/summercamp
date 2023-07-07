@@ -16,8 +16,9 @@ used_angles = 0
 used_motions = 2
 clip_size = 8
 batch_size = 32
-learning_rate = 1e-4
-beta_VAE = 0.006
+learning_rate = 1e-6
+beta_VAE = 0.01
+beta_moe = 0.1
 latent_size = 256
 area_width = 2
 
@@ -53,7 +54,7 @@ if __name__ == '__main__':
     
 
     encoder = model.VAE_encoder (motion_size, used_motions, 256, 256, latent_size, used_angles)
-    decoder = model.VAE_decoder (motion_size, used_motions, latent_size, 256, 256, 3, used_angles)
+    decoder = model.VAE_decoder (motion_size, used_motions, latent_size, 256, 256, 4, used_angles)
     
     VAE = model.VAE(encoder, decoder)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
@@ -66,6 +67,7 @@ if __name__ == '__main__':
         print ("loading model from " + output_path + '/final_model.pth')
     except:
         print ("no training history found... please run train.py to build one...")
+        exit (0)
 
     
     x = torch.zeros ([1, motion_size])
