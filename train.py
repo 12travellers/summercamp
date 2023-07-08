@@ -24,7 +24,6 @@ h1 = 256
 h2 = 128
 moemoechu = 4
 latent_size = 128
-area_width = 2
 
 def build_data_set (data):
     dataset = []
@@ -43,17 +42,21 @@ if __name__ == '__main__':
     
     bvh = BVHLoader.load (data_path)
     motions = bvh._joint_rotation
-    motions = motions.reshape (bvh.num_frames, -1) / (math.pi * 2)
-    motions = motions + 0.5
+    motions_min = np.min(motions)
+    motions_max = np.max(motions)
+    motions = (motions - motions_min) / (motions_max - motions_min)
+    motions = motions.reshape (bvh.num_frames, -1) 
     
-    translation = bvh._joint_translation
-    translation = motions.reshape (bvh.num_frames, -1) / area_width
-    translation = translation + 0.5
+    translations = bvh._joint_translation
+    translations_min = np.min(motions)
+    translations_max = np.max(motions)
+    translations = (translations - translations_min) / (translations_max - translations_min)
+    translations = translations.reshape (bvh.num_frames, -1)
     
     
     
     # motion_size = real_motion_size + root_position_size
-    motions = np.concatenate ([motions, translation [:, 0:3]], axis = 1)
+    motions = np.concatenate ([motions, translations [:, 0:3]], axis = 1)
     motion_size = motions.shape [1]
     
     print("read " + str(motions.shape) + "motions from " + data_path)

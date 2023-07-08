@@ -40,19 +40,26 @@ if __name__ == '__main__':
     print ("train model on device:" + str(device))
         
     bvh = BVHLoader.load (data_path)
-    bvh = bvh.get_t_pose ()
-    
     
     motions = bvh._joint_rotation
-    motions = motions.reshape (bvh.num_frames, -1) / (math.pi * 2)
-    motions = motions + 0.5
+    motions_min = np.min(motions)
+    motions_max = np.max(motions)
     
-    translation = bvh._joint_translation
-    translation = motions.reshape (bvh.num_frames, -1) / area_width
-    translation = translation + 0.5
+    translations = bvh._joint_translation
+    translations_min = np.min(motions)
+    translations_max = np.max(motions)
+    
+    
+    bvh = bvh.get_t_pose ()
+    
+    motions = (motions - motions_min) / (motions_max - motions_min)
+    motions = motions.reshape (bvh.num_frames, -1) 
+    
+    translations = (translations - translations_min) / (translations_max - translations_min)
+    translations = translations.reshape (bvh.num_frames, -1)
     
     # motion_size = real_motion_size + root_position_size
-    motions = np.concatenate ([motions, translation [:, 0:3]], axis = 1)
+    motions = np.concatenate ([motions, translations [:, 0:3]], axis = 1)
     motion_size = motions.shape [1]
     
 
@@ -90,8 +97,8 @@ if __name__ == '__main__':
         trans [0:3] = (re_x [0, -3:].detach().numpy()- 0.5) * area_width
     
         
-        bvh.append_trans_rotation (trans.reshape([1, -1, 3]), \
-            (re_x[0, :-3].reshape([1, -1, 4]).detach().numpy() - 0.5) * math.pi*2)
+        bvh.append_trans_rotation (trans.reshape([1, -1, 3]) * (translations_max - translations_min) + translations_min, \
+            (re_x[0, :-3].reshape([1, -1, 4]).detach().numpy() - 0.5) * (motions_max - motions_min) + motions_min)
         
         x = re_x
      
