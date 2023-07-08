@@ -77,6 +77,7 @@ if __name__ == '__main__':
         VAE.load_state_dict (checkpoint['model'])
         epoch = checkpoint ['epoch']
         loss_history = checkpoint ['loss_history']
+        optimizer = checkpoint ['optimizer']
         print ("loading model from " + output_path + '/final_model.pth')
     except:
         print ("no training history found... rebuild another model...")
@@ -176,7 +177,8 @@ if __name__ == '__main__':
                     
         state = {'model': VAE.state_dict(),\
                     'epoch': epoch,\
-                    'loss_history': loss_history}
+                    'loss_history': loss_history,\
+                    'optimizer': optimizer}
         torch.save(state, output_path+'/final_model.pth')
         print ("iteration %d/%d, train_loss: %f", epoch, iteration, train_loss/train_nsample)
         
