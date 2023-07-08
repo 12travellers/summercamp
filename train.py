@@ -24,6 +24,7 @@ h1 = 256
 h2 = 128
 moemoechu = 4
 latent_size = 128
+beta_trans = 10
 
 def build_data_set (data):
     dataset = []
@@ -50,7 +51,7 @@ if __name__ == '__main__':
     translations = bvh._joint_translation
     translations_min = np.min(translations)
     translations_max = np.max(translations)
-    translations = (translations - translations_min) / (translations_max - translations_min)
+    translations = (translations - translations_min) / (translations_max - translations_min) * beta_trans
     translations = translations.reshape (bvh.num_frames, -1)
     
     

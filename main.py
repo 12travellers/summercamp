@@ -24,6 +24,7 @@ h1 = 256
 h2 = 128
 moemoechu = 4
 latent_size = 128
+beta_trans = 10
 
 def build_data_set (data):
     dataset = []
@@ -96,7 +97,7 @@ if __name__ == '__main__':
         
         re_x, moe_output = VAE.decoder (torch.concat ([x], dim = 1), z)
         trans = np.zeros(re_x[0, :-3].shape[0]//4*3)
-        trans [0:3] = re_x [0, -3:].detach().numpy()
+        trans [0:3] = re_x [0, -3:].detach().numpy() / beta_trans
         
         bvh.append_trans_rotation (trans.reshape([1, -1, 3]) * (translations_max - translations_min) + translations_min, \
             re_x[0, :-3].reshape([1, -1, 4]).detach().numpy() * (motions_max - motions_min) + motions_min)
