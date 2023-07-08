@@ -61,7 +61,7 @@ class VAE_decoder (torch.nn.Module):
         
         para = torch.nn.functional.elu (self.gate1 (input)) 
         para = torch.nn.functional.elu (self.gate2 (para)) 
-        para = torch.softmax (self.gate3 (para), dim = 0) 
+        para = torch.softmax (self.gate3 (para), dim = -1) 
         
         moe_output = []
         for i in range(self.moe):

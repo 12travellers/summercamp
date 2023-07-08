@@ -16,8 +16,8 @@ used_angles = 0
 used_motions = 2
 clip_size = 8
 batch_size = 32
-learning_rate = 4e-4
-beta_VAE = 0.5
+learning_rate = 4e-5
+beta_VAE = 0.01
 beta_para = 0.1
 beta_moe = 0.2
 h1 = 256
@@ -48,8 +48,8 @@ if __name__ == '__main__':
     motions = motions.reshape (bvh.num_frames, -1) 
     
     translations = bvh._joint_translation
-    translations_min = np.min(motions)
-    translations_max = np.max(motions)
+    translations_min = np.min(translations)
+    translations_max = np.max(translations)
     translations = (translations - translations_min) / (translations_max - translations_min)
     translations = translations.reshape (bvh.num_frames, -1)
     
@@ -123,6 +123,7 @@ if __name__ == '__main__':
                     loss_moe += loss_MSE(torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :]), \
                         torch.mul(moemoepara[:, :, j:j+1], motions [:, i, :].to(torch.float32)))
                 
+                
                 '''
                 for moemoe, moemoepara in moe_output:
                     for j in range(batch_size):
@@ -131,7 +132,7 @@ if __name__ == '__main__':
                 '''
                 loss_norm = loss_KLD(mu, sigma)
                 loss = loss_re + beta_VAE * loss_norm + beta_moe * loss_moe + beta_para * loss_para
-                
+            #    print(loss_re, loss_norm, loss_moe, moemoepara[:, :, j])
                 if (random.random() < teacher_p):
                     x = motions [:, i, :]
                 else:

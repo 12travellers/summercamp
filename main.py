@@ -16,14 +16,14 @@ used_angles = 0
 used_motions = 2
 clip_size = 8
 batch_size = 32
-learning_rate = 1e-5
+learning_rate = 4e-5
 beta_VAE = 0.01
-beta_moe = 0.1
+beta_para = 0.1
+beta_moe = 0.2
 h1 = 256
 h2 = 128
 moemoechu = 4
 latent_size = 128
-area_width = 2
 
 def build_data_set (data):
     dataset = []
@@ -46,15 +46,17 @@ if __name__ == '__main__':
     motions_max = np.max(motions)
     
     translations = bvh._joint_translation
-    translations_min = np.min(motions)
-    translations_max = np.max(motions)
+    translations_min = np.min(translations)
+    translations_max = np.max(translations)
     
     
     bvh = bvh.get_t_pose ()
     
+    motions = bvh._joint_rotation
     motions = (motions - motions_min) / (motions_max - motions_min)
     motions = motions.reshape (bvh.num_frames, -1) 
     
+    translations = bvh._joint_translation
     translations = (translations - translations_min) / (translations_max - translations_min)
     translations = translations.reshape (bvh.num_frames, -1)
     
@@ -94,11 +96,10 @@ if __name__ == '__main__':
         
         re_x, moe_output = VAE.decoder (torch.concat ([x], dim = 1), z)
         trans = np.zeros(re_x[0, :-3].shape[0]//4*3)
-        trans [0:3] = (re_x [0, -3:].detach().numpy()- 0.5) * area_width
-    
+        trans [0:3] = re_x [0, -3:].detach().numpy()
         
         bvh.append_trans_rotation (trans.reshape([1, -1, 3]) * (translations_max - translations_min) + translations_min, \
-            (re_x[0, :-3].reshape([1, -1, 4]).detach().numpy() - 0.5) * (motions_max - motions_min) + motions_min)
+            re_x[0, :-3].reshape([1, -1, 4]).detach().numpy() * (motions_max - motions_min) + motions_min)
         
         x = re_x
      
