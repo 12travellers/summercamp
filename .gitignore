@@ -1,2 +1,6 @@
 *.bvh
+*.zip
+output
+__pycache__
 pymotionlib
+.txt
