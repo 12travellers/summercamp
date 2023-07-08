@@ -24,7 +24,7 @@ h1 = 256
 h2 = 128
 moemoechu = 4
 latent_size = 128
-beta_trans = 10
+beta_trans = 4
 
 def build_data_set (data):
     dataset = []
@@ -72,7 +72,7 @@ if __name__ == '__main__':
     
     iteration = 40
     epoch = 0
-    p0_iteration, p1_iteration = 20, 10
+    p0_iteration, p1_iteration = 40, 20
     loss_history = {'train':[], 'test':[]}
     
     

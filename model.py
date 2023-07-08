@@ -11,11 +11,11 @@ class VAE_encoder (torch.nn.Module):
         self.latent_size = latent_size
         self.used_angles = used_angles
         
-        self.l1 = torch.nn.Linear (self.input_size, h1)
-        self.l2 = torch.nn.Linear (h1, h2)
+        self.l1 = torch.nn.Linear (self.input_size, h1, bias = True)
+        self.l2 = torch.nn.Linear (h1, h2, bias = True)
         
-        self.mull = torch.nn.Linear (h2, latent_size)
-        self.sigmall = torch.nn.Linear (h2, latent_size)
+        self.mull = torch.nn.Linear (h2, latent_size, bias = True)
+        self.sigmall = torch.nn.Linear (h2, latent_size, bias = True)
         
     def forward (self, motions, angles = torch.zeros(1, 0)):
         if (self.used_angles > 0):
@@ -39,13 +39,13 @@ class VAE_decoder (torch.nn.Module):
         self.used_angles = used_angles
         self.input_size = (motion_size + used_angles) * (used_motions - 1) + latent_size
         
-        self.l1 = torch.nn.ModuleList([torch.nn.Linear(self.input_size, h1) for i in range(self.moe)])
-        self.l2 = torch.nn.ModuleList([torch.nn.Linear(h1 + latent_size, h2) for i in range(self.moe)])
-        self.l3 = torch.nn.ModuleList([torch.nn.Linear(h2 + latent_size, motion_size) for i in range(self.moe)])
+        self.l1 = torch.nn.ModuleList([torch.nn.Linear(self.input_size, h1, bias = True) for i in range(self.moe)])
+        self.l2 = torch.nn.ModuleList([torch.nn.Linear(h1 + latent_size, h2, bias = True) for i in range(self.moe)])
+        self.l3 = torch.nn.ModuleList([torch.nn.Linear(h2 + latent_size, motion_size, bias = True) for i in range(self.moe)])
 
-        self.gate1 = torch.nn.Linear (self.input_size, h1)
-        self.gate2 = torch.nn.Linear (h1, h2)
-        self.gate3 = torch.nn.Linear (h2, self.moe)
+        self.gate1 = torch.nn.Linear (self.input_size, h1, bias = True)
+        self.gate2 = torch.nn.Linear (h1, h2, bias = True)
+        self.gate3 = torch.nn.Linear (h2, self.moe, bias = True)
 
         
     def forward (self, motions, z, angles = torch.zeros(1, 0)):
