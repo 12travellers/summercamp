@@ -6,6 +6,7 @@ import numpy as np
 import math
 from tqdm import tqdm
 import random
+import sys
 
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
@@ -18,7 +19,7 @@ clip_size = 8
 batch_size = 32
 learning_rate = 4e-5
 beta_VAE = 0.01
-beta_para = 0.1
+beta_para = 0.01
 beta_moe = 0.2
 h1 = 256
 h2 = 128
@@ -40,6 +41,10 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print ("train model on device:" + str(device))
 
+    make_new = False
+    if (len(sys.argv) > 0):
+        if (str(sys.argv)[0] == '-n'):
+            make_new =  True
     
     bvh = BVHLoader.load (data_path)
     motions = bvh._joint_rotation
@@ -70,13 +75,14 @@ if __name__ == '__main__':
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
     
-    iteration = 40
+    iteration = 50
     epoch = 0
     p0_iteration, p1_iteration = 40, 20
     loss_history = {'train':[], 'test':[]}
     
     
     try:
+        assert (make_new)
         checkpoint = torch.load (output_path + '/final_model.pth')
         VAE.load_state_dict (checkpoint['model'])
         epoch = checkpoint ['epoch']
@@ -117,20 +123,16 @@ if __name__ == '__main__':
                 re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                     
                 loss_re = loss_MSE(re_x, motions [:, i, :].to(torch.float32))
-                loss_moe, loss_para = 0, 0
+                loss_moe = 0
                 
                 moemoe, moemoepara = moe_output
                 for j in range(moemoechu):
                     loss_moe += loss_MSE(torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :]), \
                         torch.mul(moemoepara[:, :, j:j+1], motions [:, i, :].to(torch.float32)))
+
+                loss_para = torch.sum (torch.mul (moemoepara, moemoepara), dim = (0, 1, 2)).item()
+        
                 
-                
-                '''
-                for moemoe, moemoepara in moe_output:
-                    for j in range(batch_size):
-                        loss_moe += moemoepara[j] * loss_MSE(moemoe[j], motions [j, i, :].to(torch.float32))
-                    loss_para += 0
-                '''
                 loss_norm = loss_KLD(mu, sigma)
                 loss = loss_re + beta_VAE * loss_norm + beta_moe * loss_moe + beta_para * loss_para
             #    print(loss_re, loss_norm, loss_moe, moemoepara[:, :, j])
@@ -138,6 +140,9 @@ if __name__ == '__main__':
                     x = motions [:, i, :]
                 else:
                     x = re_x
+                
+                if (train_nsample == 0):
+                    print (loss_re, beta_VAE*loss_norm, beta_moe*loss_moe, beta_para*loss_para)
                 
             
             loss.backward()
