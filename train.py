@@ -18,7 +18,7 @@ used_motions = 2
 clip_size = 8
 batch_size = 32
 learning_rate = 4e-5
-beta_VAE = 0.01
+beta_VAE = 1
 beta_para = 0.01
 beta_moe = 0.2
 h1 = 256
@@ -56,7 +56,7 @@ if __name__ == '__main__':
     translations = bvh._joint_translation
     translations_min = np.min(translations)
     translations_max = np.max(translations)
-    translations = (translations - translations_min) / (translations_max - translations_min) * beta_trans
+    translations = (translations - translations_min) / (translations_max - translations_min)
     translations = translations.reshape (bvh.num_frames, -1)
     
     
@@ -122,7 +122,8 @@ if __name__ == '__main__':
             for i in range (1, clip_size):
                 re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                     
-                loss_re = loss_MSE(re_x, motions [:, i, :].to(torch.float32))
+                loss_re = loss_MSE(re_x[:, :-3], motions [:, i, :-3].to(torch.float32)) +\
+                    loss_MSE(re_x[:, -3:], motions [:, i, -3:].to(torch.float32)) * beta_trans
                 loss_moe = 0
                 
                 moemoe, moemoepara = moe_output
@@ -130,7 +131,7 @@ if __name__ == '__main__':
                     loss_moe += loss_MSE(torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :]), \
                         torch.mul(moemoepara[:, :, j:j+1], motions [:, i, :].to(torch.float32)))
 
-                loss_para = torch.sum (torch.mul (moemoepara, moemoepara), dim = (0, 1, 2)).item()
+                loss_para = torch.sum (torch.mul (moemoepara, moemoepara), dim = (0, 1, 2))
         
                 
                 loss_norm = loss_KLD(mu, sigma)
@@ -142,8 +143,9 @@ if __name__ == '__main__':
                     x = re_x
                 
                 if (train_nsample == 0):
-                    print (loss_re, beta_VAE*loss_norm, beta_moe*loss_moe, beta_para*loss_para)
+                    print (loss_re.item(), beta_VAE*loss_norm.item(), beta_moe*loss_moe.item(), beta_para*loss_para.item())
                 
+            
             
             loss.backward()
             optimizer.step()
@@ -157,7 +159,7 @@ if __name__ == '__main__':
 
         
         
-        if (epoch % 5 == 0 and epoch > p0_iteration):
+        if (epoch % 500000 == 0 and epoch > p0_iteration):
             
             test_loss, test_nsample = 0, 0
             
