@@ -17,10 +17,10 @@ used_angles = 0
 used_motions = 2
 clip_size = 8
 batch_size = 32
-learning_rate = 4e-5
-beta_VAE = 1
-beta_para = 0.01
-beta_moe = 0.2
+learning_rate = 4e-6
+beta_VAE = 10
+beta_para = 0.1
+beta_moe = 0.6
 h1 = 256
 h2 = 128
 moemoechu = 4
@@ -43,7 +43,8 @@ if __name__ == '__main__':
 
     make_new = False
     if (len(sys.argv) > 0):
-        if (str(sys.argv)[0] == '-n'):
+        print(str(sys.argv))
+        if (str(sys.argv)[1] == '-n'):
             make_new =  True
     
     bvh = BVHLoader.load (data_path)
@@ -75,14 +76,14 @@ if __name__ == '__main__':
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
     
-    iteration = 50
+    iteration = 100
     epoch = 0
     p0_iteration, p1_iteration = 40, 20
     loss_history = {'train':[], 'test':[]}
     
     
     try:
-        assert (make_new)
+        assert (False == make_new)
         checkpoint = torch.load (output_path + '/final_model.pth')
         VAE.load_state_dict (checkpoint['model'])
         epoch = checkpoint ['epoch']
@@ -128,8 +129,10 @@ if __name__ == '__main__':
                 
                 moemoe, moemoepara = moe_output
                 for j in range(moemoechu):
-                    loss_moe += loss_MSE(torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :]), \
-                        torch.mul(moemoepara[:, :, j:j+1], motions [:, i, :].to(torch.float32)))
+                    re = torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :])
+                    gt = torch.mul(moemoepara[:, :, j:j+1], motions [:, i, :]).to(torch.float32)
+                    loss_moe += loss_MSE(re[:, :-3], gt [:, :-3]) +\
+                    loss_MSE(re[:, -3:], gt[:, -3:]) * beta_trans
 
                 loss_para = torch.sum (torch.mul (moemoepara, moemoepara), dim = (0, 1, 2))
         
