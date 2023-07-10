@@ -77,7 +77,7 @@ if __name__ == '__main__':
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
     
-    iteration = 100
+    iteration = 60
     epoch = 0
     p0_iteration, p1_iteration = 40, 20
     loss_history = {'train':[], 'test':[]}
