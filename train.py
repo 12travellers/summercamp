@@ -48,6 +48,7 @@ if __name__ == '__main__':
             make_new =  True
     
     bvh = BVHLoader.load (data_path)
+    
     motions = bvh._joint_rotation
     motions_min = np.min(motions)
     motions_max = np.max(motions)
