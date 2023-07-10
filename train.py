@@ -22,6 +22,7 @@ clip_size = 8
 batch_size = 32
 learning_rate = 4e-6
 beta_VAE = 10
+beta_grow_round = 10
 beta_para = 0.1
 beta_moe = 0.2
 h1 = 256
@@ -53,15 +54,15 @@ if __name__ == '__main__':
     
     motions = bvh._joint_rotation
     motions = np.diff(motions, axis = 0)
-    motions_min = np.min(motions)
-    motions_max = np.max(motions)
+    motions_min = np.min(motions,axis=(0,1,2))
+    motions_max = np.max(motions,axis=(0,1,2))
     motions = (motions - motions_min) / (motions_max - motions_min)
     motions = motions.reshape (bvh.num_frames-1, -1) 
     
     translations = bvh._joint_translation
     translations = np.diff(translations, axis = 0)
-    translations_min = np.min(translations)
-    translations_max = np.max(translations)
+    translations_min = np.min(translations, axis=(0,1,2))
+    translations_max = np.max(translations, axis=(0,1,2))
     translations = (translations - translations_min) / (translations_max - translations_min)
     translations = translations.reshape (bvh.num_frames-1, -1)
     
@@ -83,7 +84,7 @@ if __name__ == '__main__':
     
     iteration = 60
     epoch = 0
-    p0_iteration, p1_iteration = 40, 20
+    p0_iteration, p1_iteration = 50, 30
     loss_history = {'train':[], 'test':[]}
     
     
@@ -124,6 +125,10 @@ if __name__ == '__main__':
         t = tqdm (train_loader, desc = f'[train]epoch:{epoch}')
         train_loss, train_nsample = 0, 0
         tot_loss_re , tot_loss_norm, tot_loss_moe, tot_loss_para =0,0,0,0
+        
+        beta_VAE2 = beta_VAE
+        if (epoch < beta_grow_round):
+            beta_VAE2 = beta_VAE / beta_grow_round * beta_VAE2
         for motions in train_loader:
             x = motions [:, 0, :]
             for i in range (1, clip_size):
@@ -141,10 +146,10 @@ if __name__ == '__main__':
                     loss_MSE(re[:, -3:], gt[:, -3:]) * beta_trans
 
                 loss_para = torch.sum (torch.mul (moemoepara, moemoepara), dim = (0, 1, 2))
-        
+
                 
                 loss_norm = loss_KLD(mu, sigma)
-                loss = loss_re + beta_VAE * loss_norm + beta_moe * loss_moe + beta_para * loss_para
+                loss = loss_re + beta_VAE2 * loss_norm + beta_moe * loss_moe + beta_para * loss_para
             #    print(loss_re, loss_norm, loss_moe, moemoepara[:, :, j])
                 if (random.random() < teacher_p):
                     x = motions [:, i, :]
