@@ -8,6 +8,9 @@ from tqdm import tqdm
 import random
 import sys
 
+from torch.utils.tensorboard import SummaryWriter
+
+
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 
@@ -20,7 +23,7 @@ batch_size = 32
 learning_rate = 4e-6
 beta_VAE = 10
 beta_para = 0.1
-beta_moe = 0.6
+beta_moe = 0.2
 h1 = 256
 h2 = 128
 moemoechu = 4
@@ -42,24 +45,25 @@ if __name__ == '__main__':
     print ("train model on device:" + str(device))
 
     make_new = False
-    if (len(sys.argv) > 0):
-        print(str(sys.argv))
-        if (str(sys.argv)[1] == '-n'):
+    if (len(sys.argv) > 1):
+        if (sys.argv[1] == 'new'):
             make_new =  True
     
     bvh = BVHLoader.load (data_path)
     
     motions = bvh._joint_rotation
+    motions = np.diff(motions, axis = 0)
     motions_min = np.min(motions)
     motions_max = np.max(motions)
     motions = (motions - motions_min) / (motions_max - motions_min)
-    motions = motions.reshape (bvh.num_frames, -1) 
+    motions = motions.reshape (bvh.num_frames-1, -1) 
     
     translations = bvh._joint_translation
+    translations = np.diff(translations, axis = 0)
     translations_min = np.min(translations)
     translations_max = np.max(translations)
     translations = (translations - translations_min) / (translations_max - translations_min)
-    translations = translations.reshape (bvh.num_frames, -1)
+    translations = translations.reshape (bvh.num_frames-1, -1)
     
     
     
@@ -95,6 +99,7 @@ if __name__ == '__main__':
         print ("no training history found... rebuild another model...")
         
     
+    writer = SummaryWriter(log_dir='runs/vae')
     
     train_loader = torch.utils.data.DataLoader(\
         dataset = build_data_set (train_motions).to(device),\
@@ -118,7 +123,7 @@ if __name__ == '__main__':
         
         t = tqdm (train_loader, desc = f'[train]epoch:{epoch}')
         train_loss, train_nsample = 0, 0
-        
+        tot_loss_re , tot_loss_norm, tot_loss_moe, tot_loss_para =0,0,0,0
         for motions in train_loader:
             x = motions [:, 0, :]
             for i in range (1, clip_size):
@@ -145,11 +150,29 @@ if __name__ == '__main__':
                     x = motions [:, i, :]
                 else:
                     x = re_x
+                tot_loss_re += loss_re.item()
+                tot_loss_norm += beta_VAE * loss_norm.item()
+                tot_loss_moe += beta_moe * loss_moe.item()
+                tot_loss_para += beta_para * loss_para.item()
+                train_nsample += (clip_size-1) * batch_size
+                train_loss += loss.item()
                 
-                if (train_nsample == 0):
-                    print (loss_re.item(), beta_VAE*loss_norm.item(), beta_moe*loss_moe.item(), beta_para*loss_para.item())
-                
-            
+            writer.add_scalar(tag="loss_re",
+                    scalar_value=tot_loss_re/train_nsample,
+                    global_step=epoch
+                    )
+            writer.add_scalar(tag="loss_norm",
+                    scalar_value=tot_loss_norm/train_nsample,
+                    global_step=epoch
+                    )
+            writer.add_scalar(tag="loss_moe",
+                    scalar_value=tot_loss_moe/train_nsample,
+                    global_step=epoch
+                    )
+            writer.add_scalar(tag="loss_para",
+                    scalar_value=tot_loss_para/train_nsample,
+                    global_step=epoch
+                    )
             
             loss.backward()
             optimizer.step()

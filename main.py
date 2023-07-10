@@ -55,11 +55,15 @@ if __name__ == '__main__':
     
     motions = bvh._joint_rotation
     motions = (motions - motions_min) / (motions_max - motions_min)
-    motions = motions.reshape (bvh.num_frames, -1) 
+    motions = motions.reshape (bvh.num_frames-1, -1) 
     
     translations = bvh._joint_translation
     translations = (translations - translations_min) / (translations_max - translations_min)
-    translations = translations.reshape (bvh.num_frames, -1)
+    translations = translations.reshape (bvh.num_frames-1, -1)
+    
+    
+    now_trans = translations
+    now_rotat = motions
     
     # motion_size = real_motion_size + root_position_size
     motions = np.concatenate ([motions, translations [:, 0:3]], axis = 1)
@@ -89,8 +93,6 @@ if __name__ == '__main__':
     
     x = torch.tensor (motions [0:1, :] )
     
-    
-    
     while anime_time > 0:
         anime_time -= 1
         z = torch.randn(1, latent_size)
@@ -99,8 +101,9 @@ if __name__ == '__main__':
         trans = np.zeros(re_x[0, :-3].shape[0]//4*3)
         trans [0:3] = re_x [0, -3:].detach().numpy()
         
-        bvh.append_trans_rotation (trans.reshape([1, -1, 3]) * (translations_max - translations_min) + translations_min, \
-            re_x[0, :-3].reshape([1, -1, 4]).detach().numpy() * (motions_max - motions_min) + motions_min)
+        now_trans += trans.reshape([1, -1, 3]) * (translations_max - translations_min) + translations_min
+        now_rotat += re_x[0, :-3].reshape([1, -1, 4]).detach().numpy() * (motions_max - motions_min) + motions_min
+        bvh.append_trans_rotation (now_trans, now_rotat)
         
         x = re_x
      
