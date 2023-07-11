@@ -21,7 +21,7 @@ used_motions = 2
 clip_size = 8
 batch_size = 32
 learning_rate = 4e-6
-beta_VAE = 10
+beta_VAE = 1
 beta_grow_round = 10
 beta_para = 0.1
 beta_moe = 0.2
@@ -71,7 +71,7 @@ def transform_bvh (bvh):
         for j in range(0, len(bvh._skeleton_joints)):
             motion.append (linear_velocity[i, j])
             translation.append (angular_velocity[i, j])
-            if (j == 1 and predicted_size == None):
+            if (j == 0 and predicted_size == None):
                 predicted_sizes = [\
                     np.concatenate (motion, axis = -1).shape[-1],\
                     np.concatenate (translation, axis = -1).shape[-1]]
@@ -92,12 +92,8 @@ def transform_bvh (bvh):
     return motions, translations
 
 def transform_as_predict (o):
-    try:
-        return torch.concatenate([o[:, :predicted_sizes[0]],\
-            o[:, input_sizes[0]:input_sizes[0] + predicted_sizes[1]]], dim = 1)
-    except:
-        return np.concatenate([o[:, :predicted_sizes[0]],\
-            o[:, input_sizes[0]:input_sizes[0] + predicted_sizes[1]]], dim = 1)
+    return [o[:, :predicted_sizes[0]],\
+        o[:, input_sizes[0]:input_sizes[0] + predicted_sizes[1]]]
     
 
 
@@ -183,7 +179,7 @@ if __name__ == '__main__':
             for i in range (1, clip_size):
                 re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                 
-                gt = transform_as_predict(motions [:, i, :]).to(torch.float32)
+                gt = torch.concat(transform_as_predict(motions [:, i, :]), axis=1).to(torch.float32)
                 
                 loss_re = loss_MSE(re_x, gt)
                 loss_moe = 0
