@@ -3,7 +3,7 @@ import numpy as np
 
 
 class VAE_encoder (torch.nn.Module):
-    def __init__ (self, motion_size, used_motions, h1, h2, latent_size, used_angles):
+    def __init__ (self, motion_size, used_motions, h1, h2, latent_size, used_angles = 0):
         super (VAE_encoder, self).__init__()
         self.motion_size = motion_size
         self.used_motions = used_motions
@@ -30,7 +30,7 @@ class VAE_encoder (torch.nn.Module):
         
         
 class VAE_decoder (torch.nn.Module):
-    def __init__ (self, motion_size, used_motions, latent_size, h1, h2, moe, used_angles):
+    def __init__ (self, motion_size, used_motions, latent_size, predicted_size, h1, h2, moe, used_angles = 0):
         super (VAE_decoder, self).__init__()
         self.used_motions = used_motions
         self.motion_size = motion_size
@@ -41,7 +41,7 @@ class VAE_decoder (torch.nn.Module):
         
         self.l1 = torch.nn.ModuleList([torch.nn.Linear(self.input_size, h1, bias = True) for i in range(self.moe)])
         self.l2 = torch.nn.ModuleList([torch.nn.Linear(h1 + latent_size, h2, bias = True) for i in range(self.moe)])
-        self.l3 = torch.nn.ModuleList([torch.nn.Linear(h2 + latent_size, motion_size, bias = True) for i in range(self.moe)])
+        self.l3 = torch.nn.ModuleList([torch.nn.Linear(h2 + latent_size, predicted_size, bias = True) for i in range(self.moe)])
 
         self.gate1 = torch.nn.Linear (self.input_size, h1, bias = True)
         self.gate2 = torch.nn.Linear (h1, h2, bias = True)

@@ -1,4 +1,5 @@
 import model
+import train
 import torch
 import pymotionlib
 from pymotionlib import BVHLoader
@@ -70,7 +71,7 @@ if __name__ == '__main__':
     
 
     encoder = model.VAE_encoder (motion_size, used_motions, h1, h2, latent_size, used_angles)
-    decoder = model.VAE_decoder (motion_size, used_motions, latent_size, h1, h2, moemoechu, used_angles)
+    decoder = model.VAE_decoder (motion_size, used_motions, latent_size, predicted_size, h1, h2, moemoechu, used_angles)
      
     VAE = model.VAE(encoder, decoder)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
