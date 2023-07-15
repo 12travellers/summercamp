@@ -45,7 +45,7 @@ class motion_data_set(torch.utils.data.Dataset):
         for i in range (data.shape[0] - clip_size):
             datapiece = data[i:i+clip_size, :]
             datapiece = datapiece
-            self.dataset.append (torch.tensor(datapiece).to(device))
+            self.dataset.append (torch.tensor(datapiece))
             self.root_ori.append (root_info[i+1][0])
             self.root_pos.append (root_info[i+1][1])
     
@@ -122,51 +122,50 @@ def transform_bvh (bvh):
     return motions, translations, root_info
 
 def transform_as_predict (o):
-    print(o.shape, predicted_sizes[1])
     return [o[:, :predicted_sizes[0]],\
         o[:, input_sizes[0]:input_sizes[0] + predicted_sizes[1]]]
 
-def compute_motion_info (x, root_ori, root_pos):
-    joint_position, joint_orientation = [root_pos.detach().numpy()], [root_ori.detach().numpy()]
+def compute_motion_info (x, root_ori, root_pos, bvh):
+    joint_position, joint_orientation = [root_pos], [root_ori]
     bs = predicted_sizes[0]
     
-    root_ori = R(root_ori.detach().numpy())
+    root_ori = R(root_ori)
     
     
     for i in range(0, joint_num-1):
-        joint_position.append(root_ori.apply(x[bs+i*3:bs+i*3+3]) + root_pos.detach().numpy())
+        joint_position.append(np.add(root_ori.apply(x[bs+i*3:bs+i*3+3]), root_pos))
         joint_orientation.append((root_ori * R(x[i*4:i*4+4])).as_quat())
+        
     
-    print(joint_position[0].shape)
     joint_translation, joint_rotation = None, None
     joint_translation, joint_rotation =\
         bvh.compute_joint_local_info (joint_position, joint_orientation, joint_translation, joint_rotation)
-    return joint_translation, joint_rotation
+    return joint_translation[0], joint_rotation[0]
 
 def transform_root (re_x, root_ori_b, root_pos_b):
     ori, pos = re_x [:predicted_sizes[0]], re_x[predicted_sizes[0]:]
     root_ori = root_ori_b + ori[-4:]
     root_pos = root_pos_b + pos[-3:]
     return root_ori, root_pos
-def transform_as_input (x, re_x, root_ori_b, root_pos_b):
+def transform_as_input (x, re_x, root_ori_b, root_pos_b, bvh):
     
-    ori, pos = re_x [:predicted_sizes[0]], re_x[predicted_sizes[0]:]
-    root_ori = root_ori_b + ori[-4:]
-    root_pos = root_pos_b + pos[-3:]
+    ori, pos = re_x[:predicted_sizes[0]], re_x[predicted_sizes[0]:]
+    root_ori = np.add(root_ori_b, ori[-4:])
+    root_pos = np.add(root_pos_b, pos[-3:])
     
-    jt_b, jr_b = compute_motion_info(x, root_ori_b, root_pos_b)
-    jt, jr = compute_motion_info(re_x, root_ori, root_pos)
+    jt_b, jr_b = compute_motion_info(x, root_ori_b, root_pos_b, bvh)
+    jt, jr = compute_motion_info(re_x, root_ori, root_pos, bvh)
     
-    root_ori = R(root_ori, normalize=False, copy=False)
-    root_ori = root_ori.inv()
-    extra_t, extra_r = []
-    for j in range(1, num_frames):
-        extra_r.append(root_ori.apply(jr[j] - jr_b[j]))
-        extra_t.append(root_ori.apply(jt[j] - jt_b[j]))
+    root_ori2 = R(root_ori, normalize=False, copy=False)
+    root_ori2 = root_ori2.inv()
+    extra_t, extra_r = [], []
+    for j in range(1, joint_num):
+        extra_r.append(torch.tensor(((root_ori2 * R(jr[j] - jr_b[j])).as_quat())))
+        extra_t.append(torch.tensor((root_ori2.apply(jt[j] - jt_b[j]))))
     
-    return torch.concat ([ori[:-4], root_ori] + extra_r +\
-                         [pos[:-3], root_pos] + extra_t, dim = -1)
-
+    return torch.concat ([torch.tensor(ori[:-4]), torch.tensor(root_ori)] + extra_r +\
+                         [torch.tensor(pos[:-3]), torch.tensor(root_pos)] + extra_t, dim = -1)
+    
 
 if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -225,6 +224,7 @@ if __name__ == '__main__':
     train_loader = torch.utils.data.DataLoader(\
         dataset = motion_data_set (train_motions, root_info),\
         batch_size = batch_size,\
+        drop_last = True,\
         shuffle = True)
     
     loss_MSE = torch.nn.MSELoss(reduction = 'sum')
@@ -239,11 +239,11 @@ if __name__ == '__main__':
             teacher_p = (p1_iteration - epoch) / (p0_iteration - p1_iteration)
         elif(epoch < p1_iteration):
             teacher_p = 1
+        
+        ##
         epoch += 1 
         
         
-        ###
-        teacher_p = 0
         
         t = tqdm (train_loader, desc = f'[train]epoch:{epoch}')
         train_loss, train_nsample = 0, 0
@@ -253,11 +253,13 @@ if __name__ == '__main__':
         if (epoch < beta_grow_round):
             beta_VAE2 = beta_VAE / beta_grow_round * beta_VAE2
         for motions, root_ori, root_pos in train_loader:
-            x = motions [:, 0, :]
+            x = motions [:, 0, :].to(device)
+            root_ori, root_pos = root_ori.numpy(), root_pos.numpy()
             for i in range (1, clip_size):
-                re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
+                re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :].to(device)], dim = 1))
                 
                 gt = torch.concat(transform_as_predict(motions [:, i, :]), axis=1).to(torch.float32)
+                gt = gt.to(device)
                 
                 loss_re = loss_MSE(re_x, gt)
                 loss_moe = 0
@@ -282,18 +284,19 @@ if __name__ == '__main__':
                 loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
-                
            
-                x, re_x = x.detach(), re_x.detach()
+                x= x.detach()
+                re_x = re_x.cpu().detach().numpy()
+                
                 if (random.random() < teacher_p):
                     x = motions [:, i, :]
                 else:
+                    x = x.cpu().detach().numpy()
                     for j in range(0, batch_size):
-                        x[j] =\
-                            transform_as_input (x[j].cpu(), re_x[j].cpu(),\
-                                root_ori[j], root_pos[j]).device()
-                    root_ori[j], root_pos[j] = transform_root(re_x, root_ori[j], root_pos[j])
+                        x[j] = transform_as_input (x[j], re_x[j], root_ori[j], root_pos[j], bvh)
+                root_ori[j], root_pos[j] = transform_root(re_x[j], root_ori[j], root_pos[j])
                     
+                x=torch.tensor(x).to(device)
 
                 
             train_loss += loss.item()

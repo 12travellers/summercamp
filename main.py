@@ -62,7 +62,7 @@ if __name__ == '__main__':
     motions_min = checkpoint["motions_min"]
 
     bvh = BVHLoader.load (data_path).sub_sequence(114, 116)
-    motions, translations = train.transform_bvh(bvh)
+    motions, translations, root_info = train.transform_bvh(bvh)
     print(motions.shape, translations.shape)
     motions = (motions - motions_min) / (motions_max - motions_min)
     translations = (translations - translations_min) / (translations_max - translations_min)
@@ -85,41 +85,37 @@ if __name__ == '__main__':
     x = torch.from_numpy (inputs[-1])
     x = x.reshape([1] + list(x.shape))
     anime_time = 1000
-    root_pos, root_ori = bvh._joint_position[-1, 0], bvh._joint_orientation[-1, 0] 
+    root_ori, root_pos = root_info[1][0], root_info[1][1]
     
-    joint_position, joint_orientation = [], []
-    
+    joint_translations, joint_rotations = [], []
     while anime_time > 0:
         anime_time -= 1
         z = torch.randn([1, latent_size])
         
-        re_x, moe_output = VAE.decoder (x, z)
-        
-        ori, pos = re_x [0, :predicted_sizes[0]], re_x[0, predicted_sizes[0]:]
-        print(root_ori.shape, ori.shape, pos.shape)
-        root_ori = root_ori + ori[-4:]
-        root_pos = root_pos + pos[-3:]
-        ori[-3:], pos[-3:] = root_ori, root_pos
-        
-        now_pos = pos.reshape([1, -1, 3]) * (translations_max - translations_min) + translations_min
-        now_ori = ori.reshape([1, -1, 4]).detach().numpy() * (motions_max - motions_min) + motions_min
-        
+        re_x, moe_output = \
+            VAE.decoder (x, z)
+    
+
+        x = x.numpy()
+        re_x = re_x.detach().numpy()
+        print(root_ori.shape, root_pos.shape)
+        x[0] = train.transform_as_input (x[0], re_x[0], root_ori, root_pos, bvh)
+        x=torch.tensor(x)
         
         
-        joint_position.append(now_pos + root_pos)
-        joint_orientation.append(now_ori + root_ori)
+        root_ori, root_pos = train.transform_root(re_x[0], root_ori, root_pos)
         
-        x = train.transform_as_input (re_x)
+        joint_translation, joint_rotation = train.compute_motion_info(re_x[0], root_ori, root_pos, bvh)
+        
+        joint_translations.append(joint_translation)
+        joint_rotations.append(joint_rotation)
+        
     
     #bvh.recompute_joint_global_info ()
     
-    joint_translation, joint_rotation = None, None
-    joint_translation, joint_rotation = \
-        bvh.compute_joint_local_info (joint_position, joint_orientation, joint_translation, joint_rotation)
+    bvh.append_trans_rotation (joint_translations, joint_rotations)
     
-    bvh.append_trans_rotation (joint_translation, joint_rotation)
-    
-    BVHLoader.save(bvh, './infered.bvh')
+    BVHLoader.save(bvh.sub_sequence(10, bvh.num_frames), './infered.bvh')
     
     
     
