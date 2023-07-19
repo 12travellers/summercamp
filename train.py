@@ -26,7 +26,7 @@ batch_size = 32
 learning_rate = 4e-6
 beta_VAE = 2
 beta_grow_round = 10
-beta_para = 0
+beta_para = 0.0001
 beta_moe = 0.4
 h1 = 256
 h2 = 128
@@ -89,7 +89,7 @@ def transform_bvh (bvh):
         
         for j in range(1, len(bvh._skeleton_joints)):
             translation.append (root_ori.apply(position[i, j] - position[i, 0]))
-            motion.append ( (root_ori * R(orientation[i, j])).as_quat())
+            motion.append ((root_ori * R(orientation[i, j])).as_quat())
         
         for j in range(0, len(bvh._skeleton_joints)):
             if (j == 0):
