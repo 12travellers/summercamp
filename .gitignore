@@ -1,7 +1,7 @@
 *.bvh
 *.zip
-output
+output/
 __pycache__
-pymotionlib
+pymotionlib/
 .txt
 .pth
