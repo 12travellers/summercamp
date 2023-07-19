@@ -4,6 +4,7 @@ import torch
 import pymotionlib
 from pymotionlib import BVHLoader
 import numpy as np
+import os
 from scipy.spatial.transform import Rotation as R
 import math
 from tqdm import tqdm
@@ -16,13 +17,13 @@ output_path = "./output"
 data_path = "./walk1_subject5.bvh"
 used_angles = 0
 used_motions = 2
-clip_size = 8
+clip_size = 20
 batch_size = 32
 learning_rate = 4e-6
-beta_VAE = 10
-beta_grow_round = 10
-beta_para = 0.1
-beta_moe = 0.2
+beta_VAE = 2
+beta_grow_round = 20
+beta_para = 0
+beta_moe = 0.4
 h1 = 256
 h2 = 128
 moemoechu = 4
@@ -33,16 +34,8 @@ predicted_size = None
 predicted_sizes = None
 input_size = None
 input_sizes = None
+num_frames = None
 
-
-def build_data_set (data):
-    dataset = []
-    
-    for i in range (data.shape[0] - clip_size):
-        datapiece = data[i:i+clip_size, :]
-        datapiece = datapiece.reshape ([1] + list(datapiece.shape))
-        dataset.append (torch.tensor(datapiece))
-    return torch.concat (dataset, dim = 0)
 
 
 if __name__ == '__main__':
@@ -84,8 +77,8 @@ if __name__ == '__main__':
     
     x = torch.from_numpy (inputs[-1])
     x = x.reshape([1] + list(x.shape))
-    anime_time = 1000
-    root_ori, root_pos = root_info[1][0], root_info[1][1]
+    anime_time = 100
+    root_ori, root_pos = root_info[-1][0], root_info[-1][1]
     
     joint_translations, joint_rotations = [], []
     while anime_time > 0:
@@ -98,26 +91,32 @@ if __name__ == '__main__':
 
         x = x.numpy()
         re_x = re_x.detach().numpy()
-        print(root_ori.shape, root_pos.shape)
+        
+        x, re_x = train.move_input_from01 (x, motions_max, motions_min, translations_max, translations_min, input_sizes[0]),\
+                        train.move_input_from01(re_x, motions_max, motions_min, translations_max, translations_min, predicted_sizes[0])
+                
         x[0] = train.transform_as_input (x[0], re_x[0], root_ori, root_pos, bvh)
+        
+        root_ori, root_pos = train.transform_root(re_x[0], root_ori, root_pos, bvh)
+        
+        joint_translation, joint_rotation = train.compute_motion_info(re_x[0], root_ori, root_pos, bvh, predicted_sizes[0])
+        
+        joint_translations.append(joint_translation.reshape([1]+list(joint_translation.shape)))
+        joint_rotations.append(joint_rotation.reshape([1]+list(joint_rotation.shape)))
+        
+        
+        x=train.move_input_to01 (x, motions_max, motions_min, translations_max, translations_min, input_sizes[0])
         x=torch.tensor(x)
-        
-        
-        root_ori, root_pos = train.transform_root(re_x[0], root_ori, root_pos)
-        
-        joint_translation, joint_rotation = train.compute_motion_info(re_x[0], root_ori, root_pos, bvh)
-        
-        joint_translations.append(joint_translation)
-        joint_rotations.append(joint_rotation)
         
     
     #bvh.recompute_joint_global_info ()
     
-    bvh.append_trans_rotation (joint_translations, joint_rotations)
+    bvh.append_trans_rotation (np.concatenate(joint_translations, axis = 0),\
+        np.concatenate(joint_rotations, axis = 0))
     
-    BVHLoader.save(bvh.sub_sequence(10, bvh.num_frames), './infered.bvh')
+    BVHLoader.save(bvh.sub_sequence(0, bvh.num_frames), './infered.bvh')
     
-    
+    os.system("python -m pymotionlib.editor")
     
 
         
