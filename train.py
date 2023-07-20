@@ -155,9 +155,10 @@ def compute_joint_orientation (x, root_ori, root_pos, bvh, bs):
 
 
 def calc_root_ori(root_ori, angular_velocity, bvh):
-    angular_velocity = R.from_rotvec(angular_velocity)
-    angular_velocity = (R(root_ori) * angular_velocity).as_quat()
-    return root_ori + angular_velocity / bvh._fps
+    angular_velocity = R.from_rotvec(angular_velocity/2)
+    angular_velocity = (angular_velocity * R(root_ori)).as_quat()
+    v = root_ori + angular_velocity / bvh._fps
+    return v / np.linalg.norm(v)
 
 def transform_root (re_x, root_ori_b, root_pos_b, bvh):
     ori, pos = re_x [:predicted_sizes[0]], re_x[predicted_sizes[0]:]
@@ -247,7 +248,7 @@ if __name__ == '__main__':
     
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
-    iteration = 60
+    iteration = 20
     epoch = 0
     p0_iteration, p1_iteration = 40, 20
     loss_history = {'train':[], 'test':[]}

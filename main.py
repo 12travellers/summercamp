@@ -53,8 +53,16 @@ if __name__ == '__main__':
     translations_min = checkpoint["translations_min"]
     motions_max = checkpoint["motions_max"]
     motions_min = checkpoint["motions_min"]
+    
+    bvh = BVHLoader.load (data_path)
+    if False:
+        root_ori_b, root_ori = bvh._joint_orientation[-2,0],  bvh._joint_orientation[-1,0]
+        angular_velocity = bvh.compute_angular_velocity (False)[-1, 0]
+        print(train.calc_root_ori(root_ori_b, angular_velocity, bvh))
+        print(root_ori)
+        exit(0)
+    bvh = bvh.sub_sequence(114, 120)
 
-    bvh = BVHLoader.load (data_path).sub_sequence(114, 120)
     #print(bvh._joint_rotation.shape)
     bvh.recompute_joint_global_info ()
     motions, translations, root_info = train.transform_bvh(bvh)
