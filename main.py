@@ -19,7 +19,7 @@ used_angles = 0
 used_motions = 2
 clip_size = 20
 batch_size = 32
-learning_rate = 4e-6
+learning_rate = 4e-7
 beta_VAE = 2
 beta_grow_round = 20
 beta_para = 0
@@ -54,13 +54,14 @@ if __name__ == '__main__':
     motions_max = checkpoint["motions_max"]
     motions_min = checkpoint["motions_min"]
 
-    bvh = BVHLoader.load (data_path).sub_sequence(114, 116)
+    bvh = BVHLoader.load (data_path).sub_sequence(114, 120)
+    #print(bvh._joint_rotation.shape)
+    bvh.recompute_joint_global_info ()
     motions, translations, root_info = train.transform_bvh(bvh)
     print(motions.shape, translations.shape)
     motions = (motions - motions_min) / (motions_max - motions_min)
     translations = (translations - translations_min) / (translations_max - translations_min)
     inputs = np.concatenate ([motions, translations], axis = 1)
-    
     
     
     encoder = model.VAE_encoder (input_size, used_motions, h1, h2, latent_size)
@@ -88,7 +89,6 @@ if __name__ == '__main__':
         re_x, moe_output = \
             VAE.decoder (x, z)
     
-
         x = x.numpy()
         re_x = re_x.detach().numpy()
         
@@ -104,16 +104,16 @@ if __name__ == '__main__':
         joint_translations.append(joint_translation.reshape([1]+list(joint_translation.shape)))
         joint_rotations.append(joint_rotation.reshape([1]+list(joint_rotation.shape)))
         
+        print(joint_rotation.shape, joint_translation.shape)
         
         x=train.move_input_to01 (x, motions_max, motions_min, translations_max, translations_min, input_sizes[0])
         x=torch.tensor(x)
-        
+    #
     
-    #bvh.recompute_joint_global_info ()
-    
+    print(np.concatenate(joint_translations, axis = 0).shape)
     bvh.append_trans_rotation (np.concatenate(joint_translations, axis = 0),\
         np.concatenate(joint_rotations, axis = 0))
-    
+    #bvh.recompute_joint_global_info ()
     BVHLoader.save(bvh.sub_sequence(0, bvh.num_frames), './infered.bvh')
     
     os.system("python -m pymotionlib.editor")

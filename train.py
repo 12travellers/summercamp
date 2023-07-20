@@ -26,7 +26,7 @@ batch_size = 32
 learning_rate = 4e-6
 beta_VAE = 2
 beta_grow_round = 10
-beta_para = 0.0001
+beta_para = 0
 beta_moe = 0.4
 h1 = 256
 h2 = 128
@@ -89,7 +89,7 @@ def transform_bvh (bvh):
         
         for j in range(1, len(bvh._skeleton_joints)):
             translation.append (root_ori.apply(position[i, j] - position[i, 0]))
-            motion.append ((root_ori * R(orientation[i, j])).as_quat())
+            motion.append ( (root_ori * R(orientation[i, j])).as_quat())
         
         for j in range(0, len(bvh._skeleton_joints)):
             if (j == 0):
@@ -97,7 +97,7 @@ def transform_bvh (bvh):
                 motion.append (angular_velocity[i, j])
             else:
                 translation.append (root_ori.apply(linear_velocity[i, j]))
-                motion.append ((root_ori * R.from_rotvec(angular_velocity[i, j])).as_quat())
+                motion.append ((root_ori * R.from_rotvec(angular_velocity[i, j])).as_rotvec())
             if (j == 0 and predicted_size == None):
                 predicted_sizes = [\
                     np.concatenate (motion, axis = -1).shape[-1],\
@@ -142,20 +142,31 @@ def compute_motion_info (x, root_ori, root_pos, bvh, bs):
         bvh.compute_joint_local_info ([joint_position], [joint_orientation], joint_translation, joint_rotation)
     return joint_translation[0], joint_rotation[0]
 
+def compute_joint_orientation (x, root_ori, root_pos, bvh, bs):
+    joint_position, joint_orientation = [root_pos], [root_ori]
+    
+    root_ori2 = R(root_ori)
+    
+    for i in range(0, joint_num - 1):
+        joint_position.append(root_ori2.apply(x[bs+i*3:bs+i*3+3]) + root_pos)
+        joint_orientation.append((root_ori2 * R(x[i*4:i*4+4])).as_quat())
+    return joint_orientation
+
+
 
 def calc_root_ori(root_ori, angular_velocity, bvh):
-    angular_velocity = R(angular_velocity / 2)
+    angular_velocity = R.from_rotvec(angular_velocity)
     angular_velocity = (angular_velocity * R(root_ori)).as_quat()
     return root_ori + angular_velocity / bvh._fps
 
 def transform_root (re_x, root_ori_b, root_pos_b, bvh):
     ori, pos = re_x [:predicted_sizes[0]], re_x[predicted_sizes[0]:]
-    root_ori = calc_root_ori(root_ori_b, ori[-4:], bvh)
+    root_ori = calc_root_ori(root_ori_b, ori[-3:], bvh)
     root_pos = root_pos_b + pos[-3:]/bvh._fps
     return root_ori, root_pos
 def transform_root_from_input (x, root_ori_b, root_pos_b, bvh):
     ori, pos = x [:predicted_sizes[0]], x[input_sizes[0]:input_sizes[0]+predicted_sizes[1]]
-    root_ori = calc_root_ori(root_ori_b, ori[-4:], bvh)
+    root_ori = calc_root_ori(root_ori_b, ori[-3:], bvh)
     root_pos = root_pos_b + pos[-3:]/bvh._fps
     return root_ori, root_pos
 
@@ -176,7 +187,7 @@ def transform_as_input (x, re_x, root_ori_b, root_pos_b, bvh):
         return w
         
     ori, pos = re_x[:predicted_sizes[0]], re_x[predicted_sizes[0]:]
-    root_ori2 = calc_root_ori(root_ori_b, ori[-4:], bvh)
+    root_ori2 = calc_root_ori(root_ori_b, ori[-3:], bvh)
     root_pos2 = root_pos_b + pos[-3:]/bvh._fps
     
     jt_b, jr_b = compute_motion_info(x, root_ori_b, root_pos_b, bvh, input_sizes[0])
@@ -186,17 +197,25 @@ def transform_as_input (x, re_x, root_ori_b, root_pos_b, bvh):
     root_ori3 = root_ori3.inv()
     extra_t, extra_r = [], []
     
-    angular_velocity = compute_angular_velocity (np.asarray([jr_b, jr]))
     
-    for j in range(1, joint_num):
-        jrd = angular_velocity [1,j]
+    angular_velocity = compute_angular_velocity (np.asarray([\
+        compute_joint_orientation(x, root_ori_b, root_pos_b, bvh, input_sizes[0]),\
+        compute_joint_orientation(re_x, root_ori2, root_pos2, bvh, predicted_sizes[0])]))
+
+    
+    for j in range(0, joint_num):
+        jrd = angular_velocity [1, j]
         jtd = (jt[j] - jt_b[j]) * bvh._fps
         
-        extra_r.append(torch.tensor(((root_ori3 * R.from_rotvec(jrd)).as_quat())))
-        extra_t.append(torch.tensor((root_ori3.apply(jtd))))
+        if(j==0):
+            extra_r.append(torch.tensor(jrd))
+            extra_t.append(torch.tensor(jtd))
+        else:
+            extra_r.append(torch.tensor(((root_ori3 * R.from_rotvec(jrd)).as_rotvec())))
+            extra_t.append(torch.tensor((root_ori3.apply(jtd))))
     
-    return torch.concat ([torch.tensor(ori[:-4]), torch.tensor(root_ori2)] + extra_r +\
-                         [torch.tensor(pos[:-3]), torch.tensor(root_pos2)] + extra_t, dim = -1)
+    return torch.concat ([torch.tensor(ori[:-3])] + extra_r +\
+                         [torch.tensor(pos[:-3])] + extra_t, dim = -1)
     
 
 if __name__ == '__main__':
@@ -230,9 +249,9 @@ if __name__ == '__main__':
     
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
-    iteration = 120
+    iteration = 60
     epoch = 0
-    p0_iteration, p1_iteration = 80, 40
+    p0_iteration, p1_iteration = 40, 20
     loss_history = {'train':[], 'test':[]}
     
     try:
@@ -271,6 +290,7 @@ if __name__ == '__main__':
             teacher_p = (p1_iteration - epoch) / (p0_iteration - p1_iteration)
         elif(epoch < p1_iteration):
             teacher_p = 1
+        #teacher_p = 0
         
         ##
         epoch += 1 
