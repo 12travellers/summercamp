@@ -156,7 +156,7 @@ def compute_joint_orientation (x, root_ori, root_pos, bvh, bs):
 
 def calc_root_ori(root_ori, angular_velocity, bvh):
     angular_velocity = R.from_rotvec(angular_velocity)
-    angular_velocity = (angular_velocity * R(root_ori)).as_quat()
+    angular_velocity = (R(root_ori) * angular_velocity).as_quat()
     return root_ori + angular_velocity / bvh._fps
 
 def transform_root (re_x, root_ori_b, root_pos_b, bvh):
@@ -190,9 +190,6 @@ def transform_as_input (x, re_x, root_ori_b, root_pos_b, bvh):
     root_ori2 = calc_root_ori(root_ori_b, ori[-3:], bvh)
     root_pos2 = root_pos_b + pos[-3:]/bvh._fps
     
-    jt_b, jr_b = compute_motion_info(x, root_ori_b, root_pos_b, bvh, input_sizes[0])
-    jt, jr = compute_motion_info(re_x, root_ori2, root_pos2, bvh, predicted_sizes[0])
-    
     root_ori3 = R(root_ori2)
     root_ori3 = root_ori3.inv()
     extra_t, extra_r = [], []
@@ -202,15 +199,17 @@ def transform_as_input (x, re_x, root_ori_b, root_pos_b, bvh):
         compute_joint_orientation(x, root_ori_b, root_pos_b, bvh, input_sizes[0]),\
         compute_joint_orientation(re_x, root_ori2, root_pos2, bvh, predicted_sizes[0])]))
 
-    
+    rdif = (root_pos2 - root_pos_b)
     for j in range(0, joint_num):
         jrd = angular_velocity [1, j]
-        jtd = (jt[j] - jt_b[j]) * bvh._fps
         
         if(j==0):
+            jtd = rdif * bvh._fps
             extra_r.append(torch.tensor(jrd))
             extra_t.append(torch.tensor(jtd))
         else:
+            x_bs, re_x_bs = input_sizes[0]+j*3, predicted_sizes[0]+j*3
+            jtd = (re_x[re_x_bs:re_x_bs+3] - x[x_bs:x_bs+3] + rdif) * bvh._fps
             extra_r.append(torch.tensor(((root_ori3 * R.from_rotvec(jrd)).as_rotvec())))
             extra_t.append(torch.tensor((root_ori3.apply(jtd))))
     
@@ -239,7 +238,6 @@ if __name__ == '__main__':
     
     inputs = np.concatenate ([motions, translations], axis = 1)
     assert (input_size == inputs.shape [1])
-    
     
     #train_motions, test_motions = train_test_split(inputs, test_size = 0.01)
     train_motions = inputs
@@ -287,8 +285,8 @@ if __name__ == '__main__':
     while (epoch < iteration):
         teacher_p = 0
         if (epoch < p0_iteration):
-            teacher_p = (p1_iteration - epoch) / (p0_iteration - p1_iteration)
-        elif(epoch < p1_iteration):
+            teacher_p = (p0_iteration - epoch) / (p0_iteration - p1_iteration)
+        if(epoch < p1_iteration):
             teacher_p = 1
         #teacher_p = 0
         
