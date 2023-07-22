@@ -60,7 +60,7 @@ if __name__ == '__main__':
         angular_velocity = bvh.compute_angular_velocity (False)[-1, 0]
         print(train.calc_root_ori(root_ori_b, angular_velocity, bvh))
         print(root_ori)
-        exit(0)
+    
     bvh = bvh.sub_sequence(114, 120)
 
     #print(bvh._joint_rotation.shape)
@@ -73,7 +73,7 @@ if __name__ == '__main__':
     
     
     encoder = model.VAE_encoder (input_size, used_motions, h1, h2, latent_size)
-    decoder = model.VAE_decoder (input_size, used_motions, latent_size, predicted_size, h1, h2, moemoechu)
+    decoder = model.VAE_decoder (input_size, used_motions, latent_size, input_size, h1, h2, moemoechu)
     
     VAE = model.VAE(encoder, decoder)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
@@ -94,8 +94,7 @@ if __name__ == '__main__':
         anime_time -= 1
         z = torch.randn([1, latent_size])
         
-        re_x, moe_output = \
-            VAE.decoder (x, z)
+        re_x, moe_output = VAE.decoder (x, z)
     
         x = x.numpy()
         re_x = re_x.detach().numpy()
@@ -103,19 +102,15 @@ if __name__ == '__main__':
         x, re_x = train.move_input_from01 (x, motions_max, motions_min, translations_max, translations_min, input_sizes[0]),\
                         train.move_input_from01(re_x, motions_max, motions_min, translations_max, translations_min, predicted_sizes[0])
                 
-        x[0] = train.transform_as_input (x[0], re_x[0], root_ori, root_pos, bvh)
-        
+   
         root_ori, root_pos = train.transform_root(re_x[0], root_ori, root_pos, bvh)
-        
         joint_translation, joint_rotation = train.compute_motion_info(re_x[0], root_ori, root_pos, bvh, predicted_sizes[0])
         
         joint_translations.append(joint_translation.reshape([1]+list(joint_translation.shape)))
         joint_rotations.append(joint_rotation.reshape([1]+list(joint_rotation.shape)))
         
-        print(joint_rotation.shape, joint_translation.shape)
-        
-        x=train.move_input_to01 (x, motions_max, motions_min, translations_max, translations_min, input_sizes[0])
-        x=torch.tensor(x)
+        x=train.move_input_to01 (re_x, motions_max, motions_min, translations_max, translations_min, input_sizes[0])
+        x=torch.tensor(x).detach()
     #
     
     print(np.concatenate(joint_translations, axis = 0).shape)
