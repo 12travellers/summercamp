@@ -28,10 +28,10 @@ beta_VAE = 2
 beta_grow_round = 10
 beta_para = 0
 beta_moe = 0.4
-h1 = 256
-h2 = 128
+h1 = 512
+h2 = 256
 moemoechu = 4
-latent_size = 128
+latent_size = 256
 beta_trans = 4
 joint_num = 25
 predicted_size = None
@@ -149,7 +149,7 @@ def compute_motion_info (x, root_ori, root_pos, bvh, bs):
     
     for i in range(0, joint_num - 1):
         joint_position.append(root_ori2.apply(x[bs+i*3:bs+i*3+3]) + root_pos)
-        joint_orientation.append(quat_product(root_ori2, x[i*4:i*4+4]))
+        joint_orientation.append(quat_product(root_ori, x[i*4:i*4+4]))
         
     joint_translation, joint_rotation = None, None
     joint_translation, joint_rotation =\
@@ -158,13 +158,9 @@ def compute_motion_info (x, root_ori, root_pos, bvh, bs):
 
 
 def calc_root_ori(root_ori, angular_velocity, bvh):
-    #angular_velocity = R(np.concatenate([angular_velocity, np.asarray([0]),], axis=-1))
-    #angular_velocity = R.from_rotvec(angular_velocity)
-    #angular_velocity = ( angular_velocity * R(root_ori)).as_quat()
     angular_velocity = quat_product (add02av (angular_velocity), root_ori)
-    #print(angular_velocity)
     v = root_ori + angular_velocity / bvh._fps / 2
-    print(np.linalg.norm(v,axis=0,ord=2))
+    v = v / np.linalg.norm(v,axis=0,ord=2)
     return v
 
 def transform_root (re_x, root_ori_b, root_pos_b, bvh):
@@ -251,7 +247,7 @@ if __name__ == '__main__':
     train_motions = inputs
     
     encoder = model.VAE_encoder (input_size, used_motions, h1, h2, latent_size)
-    decoder = model.VAE_decoder (input_size, used_motions, latent_size, input_size, h1, h2, moemoechu)
+    decoder = model.VAE_decoder (input_size, used_motions, latent_size, input_size, h2, h1, moemoechu)
     
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
@@ -324,7 +320,7 @@ if __name__ == '__main__':
                 for j in range(moemoechu):
                     re = torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :])
                     gtp = torch.mul(moemoepara[:, :, j:j+1], gt).to(torch.float32)
-                    loss_moe += loss_MSE(re, gtp) * beta_trans
+                    loss_moe += loss_MSE(re, gtp)
 
                 loss_para = torch.sum (torch.mul (moemoepara, moemoepara), dim = (0, 1, 2))
                 loss_norm = loss_KLD(mu, sigma)

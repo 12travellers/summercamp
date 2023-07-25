@@ -17,17 +17,17 @@ output_path = "./output"
 data_path = "./walk1_subject5.bvh"
 used_angles = 0
 used_motions = 2
-clip_size = 20
+clip_size = 16
 batch_size = 32
-learning_rate = 4e-7
+learning_rate = 4e-6
 beta_VAE = 2
-beta_grow_round = 20
+beta_grow_round = 10
 beta_para = 0
 beta_moe = 0.4
-h1 = 256
-h2 = 128
+h1 = 512
+h2 = 256
 moemoechu = 4
-latent_size = 128
+latent_size = 256
 beta_trans = 4
 joint_num = 25
 predicted_size = None
@@ -73,7 +73,7 @@ if __name__ == '__main__':
     
     
     encoder = model.VAE_encoder (input_size, used_motions, h1, h2, latent_size)
-    decoder = model.VAE_decoder (input_size, used_motions, latent_size, input_size, h1, h2, moemoechu)
+    decoder = model.VAE_decoder (input_size, used_motions, latent_size, input_size, h2, h1, moemoechu)
     
     VAE = model.VAE(encoder, decoder)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
