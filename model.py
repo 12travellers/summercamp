@@ -63,7 +63,10 @@ class VAE_decoder (torch.nn.Module):
         para = torch.nn.functional.elu (self.gate2 (para)) 
         para = torch.softmax (self.gate3 (para), dim = -1) 
         
+        para = torch.transpose(para, 0, 1)
+        
         moe_output = []
+        '''
         for i in range(self.moe):
             tmp = torch.nn.functional.elu (self.l1[i] (input))
             tmp = torch.nn.functional.elu (self.l2[i] (\
@@ -78,8 +81,19 @@ class VAE_decoder (torch.nn.Module):
                 output = torch.mul (para[:, i:i+1], tmp)
             else:
                 output = output + torch.mul (para[:, i:i+1], tmp)
-
-        return output, (torch.concat (moe_output, axis = 0), para.reshape ([1]+list(para.shape)))
+        '''
+        tmp = input
+        tmp = torch.mul(torch.stack([self.l1[i](tmp) for i in range(0, self.moe)]), para[:, :, np.newaxis])
+        tmp = torch.nn.functional.elu(torch.sum(tmp, axis = 0))
+        tmp = torch.concatenate ([tmp, z], dim = 1)
+        tmp = torch.mul(torch.stack([self.l2[i](tmp) for i in range(0, self.moe)]), para[:, :, np.newaxis])
+        tmp = torch.nn.functional.elu(torch.sum(tmp, axis = 0))
+        tmp = torch.concatenate ([tmp, z], dim = 1)
+        tmp = torch.mul(torch.stack([self.l3[i](tmp) for i in range(0, self.moe)]), para[:, :, np.newaxis])
+        output = torch.sum(tmp, axis = 0)
+        output = torch.sigmoid(output)
+        
+        return output, (None,None)#(torch.concat (moe_output, axis = 0), para.reshape ([1]+list(para.shape)))
         
         
 

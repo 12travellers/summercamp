@@ -54,16 +54,18 @@ if __name__ == '__main__':
     motions_max = checkpoint["motions_max"]
     motions_min = checkpoint["motions_min"]
     
-    bvh = BVHLoader.load (data_path)
+    bvh2 = BVHLoader.load (data_path)
     if False:
         root_ori_b, root_ori = bvh._joint_orientation[-2,0],  bvh._joint_orientation[-1,0]
         angular_velocity = bvh.compute_angular_velocity (False)[-1, 0]
         print(train.calc_root_ori(root_ori_b, angular_velocity, bvh))
         print(root_ori)
     
-    bvh = bvh.sub_sequence(114, 120)
+    
+    #bvh = bvh.sub_sequence(114, 120)
+    
+    bvh = bvh2.sub_sequence(514,516)
 
-    #print(bvh._joint_rotation.shape)
     bvh.recompute_joint_global_info ()
     motions, translations, root_info = train.transform_bvh(bvh)
     print(motions.shape, translations.shape)
@@ -90,21 +92,27 @@ if __name__ == '__main__':
     root_ori, root_pos = root_info[-1][0], root_info[-1][1]
     
     joint_translations, joint_rotations = [], []
+    
+    
     while anime_time > 0:
         anime_time -= 1
         z = torch.randn([1, latent_size])
         
         re_x, moe_output = VAE.decoder (x, z)
+        
+        #test basic function
+        #re_x = torch.from_numpy(inputs[1000-anime_time])
+        #re_x = re_x.reshape([1] + list(re_x.shape))
     
         x = x.numpy()
         re_x = re_x.detach().numpy()
         
         x, re_x = train.move_input_from01 (x, motions_max, motions_min, translations_max, translations_min, input_sizes[0]),\
-                        train.move_input_from01(re_x, motions_max, motions_min, translations_max, translations_min, predicted_sizes[0])
+                        train.move_input_from01(re_x, motions_max, motions_min, translations_max, translations_min, input_sizes[0])
                 
    
-        root_ori, root_pos = train.transform_root(re_x[0], root_ori, root_pos, bvh)
-        joint_translation, joint_rotation = train.compute_motion_info(re_x[0], root_ori, root_pos, bvh, predicted_sizes[0])
+        root_ori, root_pos = train.transform_root_from_input(re_x[0], root_ori, root_pos, bvh)
+        joint_translation, joint_rotation = train.compute_motion_info(re_x[0], root_ori, root_pos, bvh, input_sizes[0])
         
         joint_translations.append(joint_translation.reshape([1]+list(joint_translation.shape)))
         joint_rotations.append(joint_rotation.reshape([1]+list(joint_rotation.shape)))

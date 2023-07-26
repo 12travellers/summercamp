@@ -21,11 +21,11 @@ output_path = "./output"
 data_path = "./walk1_subject5.bvh"
 used_angles = 0
 used_motions = 2
-clip_size = 16
+clip_size = 8
 batch_size = 32
-learning_rate = 4e-6
-beta_VAE = 2
-beta_grow_round = 10
+learning_rate = 4e-5
+beta_VAE = 0.2
+beta_grow_round = 4
 beta_para = 0
 beta_moe = 0.4
 h1 = 512
@@ -62,7 +62,8 @@ class motion_data_set(torch.utils.data.Dataset):
 
 
 def move_to_01 (data):
-    _min, _max = np.min(data), np.max(data)
+    _min, _max = np.mean(data,axis=(0,1)), np.std(data,axis=(0,1))+np.mean(data,axis=(0,1))
+    _min, _max = np.min(data, axis = (0,1)), np.max(data, axis = (0,1))
     return (data - _min) / (_max - _min), _min, _max
 def move_input_to01(x, motions_max, motions_min, translations_max, translations_min, bs):
     x[:, :bs] = (x[:, :bs] - motions_min)/(motions_max-motions_min)
@@ -232,6 +233,7 @@ if __name__ == '__main__':
     
     
     bvh = BVHLoader.load (data_path)
+    bvh = bvh.sub_sequence(250)
     print("read " + str(bvh.num_frames) + " motions from " + data_path)
     
     motions, translations, root_info = transform_bvh(bvh)
@@ -251,9 +253,9 @@ if __name__ == '__main__':
     
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
-    iteration = 120
+    iteration = 200
     epoch = 0
-    p0_iteration, p1_iteration = 40, 20
+    p0_iteration, p1_iteration = 60, 20
     loss_history = {'train':[], 'test':[]}
     
     try:
@@ -301,35 +303,31 @@ if __name__ == '__main__':
         train_loss, train_nsample = 0, 0
         tot_loss_re, tot_loss_norm, tot_loss_moe, tot_loss_para = 0,0,0,0
         
-        beta_VAE2 = beta_VAE
-        if (epoch < beta_grow_round):
-            beta_VAE2 = beta_VAE / beta_grow_round * epoch
+        #beta_VAE2 = beta_VAE
+        beta_VAE2 = beta_VAE / beta_grow_round * (divmod(epoch, beta_grow_round)[1]+1)
         for motions, root_ori, root_pos in train_loader:
             x = motions [:, 0, :]
             #root_ori, root_pos = root_ori.clone().detach().numpy(), root_pos.clone().detach().numpy()
             for i in range (1, clip_size):
                 re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                 
-                gt = motions [:, i, :]
-                gt = gt.to(device)
-                
-                loss_re = loss_MSE(re_x, gt)
+                loss_re = loss_MSE(re_x, motions [:, i, :])
                 loss_moe = 0
                 
                 moemoe, moemoepara = moe_output
-                for j in range(moemoechu):
-                    re = torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :])
-                    gtp = torch.mul(moemoepara[:, :, j:j+1], gt).to(torch.float32)
-                    loss_moe += loss_MSE(re, gtp)
+                #for j in range(moemoechu):
+                #    re = torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :])
+                #    gtp = torch.mul(moemoepara[:, :, j:j+1], gt).to(torch.float32)
+                #    loss_moe += loss_MSE(re, gtp)
 
-                loss_para = torch.sum (torch.mul (moemoepara, moemoepara), dim = (0, 1, 2))
+                #loss_para = # torch.sum (torch.mul (moemoepara, moemoepara), dim = (0, 1, 2))
                 loss_norm = loss_KLD(mu, sigma)
-                loss = loss_re + beta_VAE2 * loss_norm + beta_moe * loss_moe + beta_para * loss_para
+                loss = loss_re + beta_VAE2 * loss_norm + beta_moe * loss_moe #+ beta_para * loss_para
            
                 tot_loss_re += loss_re.item()
                 tot_loss_norm += beta_VAE2 * loss_norm.item()
-                tot_loss_moe += beta_moe * loss_moe.item()
-                tot_loss_para += beta_para * loss_para.item()
+                #tot_loss_moe += beta_moe * loss_moe.item()
+                #tot_loss_para += beta_para * loss_para.item()
                 train_nsample += (clip_size-1) * batch_size
                 train_loss += loss.item()
             
@@ -339,7 +337,7 @@ if __name__ == '__main__':
                 
                 
                 if (random.random() < teacher_p):
-                    x = motions[:, i, :].detach()
+                    x = motions[:, i, :]
                 else:
                     x = re_x.detach()
                     
