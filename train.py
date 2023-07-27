@@ -34,6 +34,7 @@ moemoechu = 4
 latent_size = 256
 beta_trans = 4
 joint_num = 25
+beta_predict = 0.8
 predicted_size = None
 predicted_sizes = None
 input_size = None
@@ -100,8 +101,8 @@ def transform_bvh (bvh):
                 translation.append (linear_velocity[i, j])
                 motion.append (angular_velocity[i, j])
             else:
-                translation.append (linear_velocity[i, j])
-                motion.append (angular_velocity[i, j])
+                translation.append (root_ori2.apply(linear_velocity[i, j]))
+                motion.append (root_ori2.apply(angular_velocity[i, j]))
             if (j == 0 and predicted_size == None):
                 predicted_sizes = [\
                     np.concatenate (motion, axis = -1).shape[-1],\
@@ -128,7 +129,7 @@ def transform_bvh (bvh):
     return motions, translations, root_info
 
 def calc_root_ori(root_ori, angular_velocity, bvh):
-    angular_velocity = quat_product (add02av (angular_velocity), root_ori)
+    angular_velocity = R(root_ori).apply(angular_velocity)
     v = root_ori + angular_velocity / bvh._fps / 2
     v = v / np.linalg.norm(v,axis=0,ord=2)
     return v
@@ -146,7 +147,7 @@ def compute_motion_info (x, root_pos, root_ori, jtb, jrb, bvh):
         v = quat_product(v, jrb[i+1]) / bvh._fps / 2 + jrb[i+1]
         v = v / np.linalg.norm(v,axis=0,ord=2)
         '''
-        jr.append(calc_root_ori(jrb[i+1],x[bt+i*3:bt+i*3+3],bvh))
+        jr.append(calc_root_ori(jrb[i+1],root_ori2.apply(x[bt+i*3:bt+i*3+3]),bvh))
     return jt, jr
     '''
 def compute_motion_info (x, root_ori, root_pos, bvh, bs):
@@ -306,6 +307,7 @@ if __name__ == '__main__':
         t = tqdm (train_loader, desc = f'[train]epoch:{epoch}')
         train_loss, train_nsample = 0, 0
         tot_loss_re, tot_loss_norm, tot_loss_moe, tot_loss_para = 0,0,0,0
+        tot_loss_re1, tot_loss_re2 = 0,0
         
         #beta_VAE2 = beta_VAE
         beta_VAE2 = beta_VAE / beta_grow_round * (divmod(epoch, beta_grow_round)[1]+1)
@@ -317,7 +319,11 @@ if __name__ == '__main__':
             for i in range (1, clip_size):
                 re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                 
-                loss_re = loss_MSE(re_x, motions [:, i, :])
+                loss_re1 = loss_MSE(re_x, motions [:, i, :])
+                k1 = slice(predicted_sizes[0]-3, input_sizes[0], 1)
+                k2 = slice(input_sizes[0]+predicted_sizes[1]-3, input_size, 1)
+                loss_re2 = loss_MSE(re_x[k1], motions [:, i, k1]) + loss_MSE(re_x[k2], motions [:, i, k2])
+                loss_re = loss_re1 * (1-beta_predict) + loss_re2 * beta_predict
                 loss_moe = 0
                 
                 moemoe, moemoepara = moe_output
@@ -332,6 +338,8 @@ if __name__ == '__main__':
            
                 tot_loss_re += loss_re.item()
                 tot_loss_norm += loss_norm.item()
+                tot_loss_re1 += loss_re1.item()
+                tot_loss_re2 += loss_re2.item()
                 #tot_loss_moe += loss_moe.item()
                 #tot_loss_para += loss_para.item()
         
@@ -359,11 +367,11 @@ if __name__ == '__main__':
         writer.add_scalar(tag="loss_norm",
             scalar_value=tot_loss_norm/train_nsample,
             global_step=epoch)
-        writer.add_scalar(tag="loss_moe",
-            scalar_value=tot_loss_moe/train_nsample,
+        writer.add_scalar(tag="loss_re1",
+            scalar_value=tot_loss_re1/train_nsample,
             global_step=epoch)
-        writer.add_scalar(tag="loss_para",
-            scalar_value=tot_loss_para/train_nsample,
+        writer.add_scalar(tag="loss_re2",
+            scalar_value=tot_loss_re2/train_nsample,
             global_step=epoch)
                   
         state = {'model': VAE.state_dict(),\
