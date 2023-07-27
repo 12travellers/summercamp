@@ -39,6 +39,7 @@ num_frames = None
 
 
 if __name__ == '__main__':
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print ("train model on device:" + str(device))
     
@@ -54,7 +55,11 @@ if __name__ == '__main__':
     motions_max = checkpoint["motions_max"]
     motions_min = checkpoint["motions_min"]
     
-    bvh2 = BVHLoader.load (data_path)
+    
+    bvh = BVHLoader.load (data_path).sub_sequence(514,516)
+    bvh.recompute_joint_global_info ()
+    jt, jr = bvh.joint_translation[-1], bvh._joint_rotation[-1]
+    
     if False:
         root_ori_b, root_ori = bvh._joint_orientation[-2,0],  bvh._joint_orientation[-1,0]
         angular_velocity = bvh.compute_angular_velocity (False)[-1, 0]
@@ -62,11 +67,7 @@ if __name__ == '__main__':
         print(root_ori)
     
     
-    #bvh = bvh.sub_sequence(114, 120)
     
-    bvh = bvh2.sub_sequence(514,516)
-
-    bvh.recompute_joint_global_info ()
     motions, translations, root_info = train.transform_bvh(bvh)
     print(motions.shape, translations.shape)
     motions = (motions - motions_min) / (motions_max - motions_min)
@@ -88,10 +89,13 @@ if __name__ == '__main__':
     
     x = torch.from_numpy (inputs[-1])
     x = x.reshape([1] + list(x.shape))
-    anime_time = 100
+    anime_time = 1000
     root_ori, root_pos = root_info[-1][0], root_info[-1][1]
+
     
-    joint_translations, joint_rotations = [], []
+    bvh = BVHLoader.load (data_path).sub_sequence(514,516)
+    bvh.recompute_joint_global_info ()
+    jt, jr = bvh._joint_translation[-1], bvh._joint_rotation[-1]
     
     
     while anime_time > 0:
@@ -112,18 +116,16 @@ if __name__ == '__main__':
                 
    
         root_ori, root_pos = train.transform_root_from_input(re_x[0], root_ori, root_pos, bvh)
-        joint_translation, joint_rotation = train.compute_motion_info(re_x[0], root_ori, root_pos, bvh, input_sizes[0])
-        
-        joint_translations.append(joint_translation.reshape([1]+list(joint_translation.shape)))
-        joint_rotations.append(joint_rotation.reshape([1]+list(joint_rotation.shape)))
+        jt, jr = train.compute_motion_info(re_x[0], root_pos, root_ori, jt, jr, bvh)
+
         
         x=train.move_input_to01 (re_x, motions_max, motions_min, translations_max, translations_min, input_sizes[0])
         x=torch.tensor(x).detach()
+        
+        bvh.append_trans_rotation (np.asarray([jt]), np.asarray([jr]))
     #
     
-    print(np.concatenate(joint_translations, axis = 0).shape)
-    bvh.append_trans_rotation (np.concatenate(joint_translations, axis = 0),\
-        np.concatenate(joint_rotations, axis = 0))
+    optimizer.zero_grad()
     #bvh.recompute_joint_global_info ()
     BVHLoader.save(bvh.sub_sequence(0, bvh.num_frames), './infered.bvh')
     

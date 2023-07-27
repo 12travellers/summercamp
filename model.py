@@ -39,9 +39,9 @@ class VAE_decoder (torch.nn.Module):
         self.used_angles = used_angles
         self.input_size = (motion_size + used_angles) * (used_motions - 1) + latent_size
         
-        self.l1 = torch.nn.ModuleList([torch.nn.Linear(self.input_size, h1, bias = True) for i in range(self.moe)])
-        self.l2 = torch.nn.ModuleList([torch.nn.Linear(h1 + latent_size, h2, bias = True) for i in range(self.moe)])
-        self.l3 = torch.nn.ModuleList([torch.nn.Linear(h2 + latent_size, predicted_size, bias = True) for i in range(self.moe)])
+        self.l1 = torch.nn.ModuleList([torch.nn.Linear(self.input_size, h1) for i in range(self.moe)])
+        self.l2 = torch.nn.ModuleList([torch.nn.Linear(h1 + latent_size, h2) for i in range(self.moe)])
+        self.l3 = torch.nn.ModuleList([torch.nn.Linear(h2 + latent_size, predicted_size) for i in range(self.moe)])
 
         self.gate1 = torch.nn.Linear (self.input_size, h1, bias = True)
         self.gate2 = torch.nn.Linear (h1, h2, bias = True)
@@ -62,8 +62,8 @@ class VAE_decoder (torch.nn.Module):
         para = torch.nn.functional.elu (self.gate1 (input)) 
         para = torch.nn.functional.elu (self.gate2 (para)) 
         para = torch.softmax (self.gate3 (para), dim = -1) 
-        
         para = torch.transpose(para, 0, 1)
+        
         
         moe_output = []
         '''
@@ -84,14 +84,14 @@ class VAE_decoder (torch.nn.Module):
         '''
         tmp = input
         tmp = torch.mul(torch.stack([self.l1[i](tmp) for i in range(0, self.moe)]), para[:, :, np.newaxis])
-        tmp = torch.nn.functional.elu(torch.sum(tmp, axis = 0))
+        tmp = torch.nn.functional.elu(torch.sum(tmp, dim = 0))
         tmp = torch.concatenate ([tmp, z], dim = 1)
         tmp = torch.mul(torch.stack([self.l2[i](tmp) for i in range(0, self.moe)]), para[:, :, np.newaxis])
-        tmp = torch.nn.functional.elu(torch.sum(tmp, axis = 0))
+        tmp = torch.nn.functional.elu(torch.sum(tmp, dim = 0))
         tmp = torch.concatenate ([tmp, z], dim = 1)
         tmp = torch.mul(torch.stack([self.l3[i](tmp) for i in range(0, self.moe)]), para[:, :, np.newaxis])
-        output = torch.sum(tmp, axis = 0)
-        output = torch.sigmoid(output)
+        output = torch.sum(tmp, dim = 0)
+        #output = torch.sigmoid(output)
         
         return output, (None,None)#(torch.concat (moe_output, axis = 0), para.reshape ([1]+list(para.shape)))
         

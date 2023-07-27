@@ -21,11 +21,11 @@ output_path = "./output"
 data_path = "./walk1_subject5.bvh"
 used_angles = 0
 used_motions = 2
-clip_size = 8
-batch_size = 32
+clip_size = 16
+batch_size = 128
 learning_rate = 4e-5
-beta_VAE = 0.2
-beta_grow_round = 4
+beta_VAE = 1
+beta_grow_round = 1
 beta_para = 0
 beta_moe = 0.4
 h1 = 512
@@ -62,7 +62,7 @@ class motion_data_set(torch.utils.data.Dataset):
 
 
 def move_to_01 (data):
-    _min, _max = np.mean(data,axis=(0,1)), np.std(data,axis=(0,1))+np.mean(data,axis=(0,1))
+    #_min, _max = np.mean(data,axis=(0,1)), np.std(data,axis=(0,1))+np.mean(data,axis=(0,1))
     _min, _max = np.min(data, axis = (0,1)), np.max(data, axis = (0,1))
     return (data - _min) / (_max - _min), _min, _max
 def move_input_to01(x, motions_max, motions_min, translations_max, translations_min, bs):
@@ -89,17 +89,18 @@ def transform_bvh (bvh):
     for i in range(1, bvh.num_frames):
         motion, translation = [], []
         root_ori = orientation[i, 0, :]
+        root_ori2 = R(root_ori).inv()
         
-        for j in range(1, len(bvh._skeleton_joints)):
-            translation.append (R(root_ori).apply(position[i, j] - position[i, 0]))
-            motion.append (quat_product(root_ori, orientation[i, j], inv_p=True))
+        #for j in range(1, len(bvh._skeleton_joints)):
+        #    translation.append (root_ori2.apply(position[i, j] - position[i, 0]))
+        #    motion.append (quat_product(root_ori, orientation[i, j], inv_p=True))
         
         for j in range(0, len(bvh._skeleton_joints)):
             if (j == 0):
                 translation.append (linear_velocity[i, j])
                 motion.append (angular_velocity[i, j])
             else:
-                translation.append (R(root_ori).apply(linear_velocity[i, j]))
+                translation.append (root_ori2.apply(linear_velocity[i, j]))
                 motion.append (quat_product(root_ori, add02av(angular_velocity[i, j]), inv_p=True))
             if (j == 0 and predicted_size == None):
                 predicted_sizes = [\
@@ -122,27 +123,30 @@ def transform_bvh (bvh):
     
     print(predicted_sizes, input_sizes)
     
-    root_info = [(orientation[i, 0, :], position[i, 0, :]) for i in range(0, num_frames)]
+    root_info = [(1*orientation[i, 0, :], 1*position[i, 0, :]) for i in range(0, num_frames)]
     
     return motions, translations, root_info
-'''
-def transform_as_predict (o):
-    return [o[:, :predicted_sizes[0]],\
-        o[:, input_sizes[0]:input_sizes[0] + predicted_sizes[1]]]
 
+def calc_root_ori(root_ori, angular_velocity, bvh):
+    angular_velocity = quat_product (add02av (angular_velocity), root_ori)
+    v = root_ori + angular_velocity / bvh._fps / 2
+    v = v / np.linalg.norm(v,axis=0,ord=2)
+    return v
 
-def compute_joint_orientation (x, root_ori, root_pos, bvh, bs):
-    joint_position, joint_orientation = [root_pos], [root_ori]
-    
+def compute_motion_info (x, root_pos, root_ori, jtb, jrb, bvh):
+    jt, jr = [root_pos], [root_ori]
     root_ori2 = R(root_ori)
-    
+    bs = input_sizes[0]+predicted_sizes[1]
+    bt = predicted_sizes[0]
     for i in range(0, joint_num - 1):
-        joint_position.append(root_ori2.apply(x[bs+i*3:bs+i*3+3]) + root_pos)
-        joint_orientation.append((root_ori2 * R(x[i*4:i*4+4])).as_quat())
-    return joint_orientation
-
-'''
-
+        jt.append(root_ori2.apply(x[bs+i*3:bs+i*3+3])/ bvh._fps + jtb[i+1])
+        v = quat_product(root_ori, x[bt+i*4:bt+i*4+4])
+        #print(v)
+        v = quat_product(v, jrb[i+1]) / bvh._fps / 2 + jrb[i+1]
+        v = v / np.linalg.norm(v,axis=0,ord=2)
+        jr.append(v)
+    return jt, jr
+    '''
 def compute_motion_info (x, root_ori, root_pos, bvh, bs):
     joint_position, joint_orientation = [root_pos], [root_ori]
     
@@ -156,19 +160,16 @@ def compute_motion_info (x, root_ori, root_pos, bvh, bs):
     joint_translation, joint_rotation =\
         bvh.compute_joint_local_info ([joint_position], [joint_orientation], joint_translation, joint_rotation)
     return joint_translation[0], joint_rotation[0]
+    '''
 
 
-def calc_root_ori(root_ori, angular_velocity, bvh):
-    angular_velocity = quat_product (add02av (angular_velocity), root_ori)
-    v = root_ori + angular_velocity / bvh._fps / 2
-    v = v / np.linalg.norm(v,axis=0,ord=2)
-    return v
-
+'''
 def transform_root (re_x, root_ori_b, root_pos_b, bvh):
     ori, pos = re_x [:predicted_sizes[0]], re_x[predicted_sizes[0]:]
     root_ori = calc_root_ori(root_ori_b, ori[-3:], bvh)
     root_pos = root_pos_b + pos[-3:]/bvh._fps
     return root_ori, root_pos
+'''
 def transform_root_from_input (x, root_ori_b, root_pos_b, bvh):
     ori, pos = x [:predicted_sizes[0]], x[input_sizes[0]:input_sizes[0]+predicted_sizes[1]]
     root_ori = calc_root_ori(root_ori_b, ori[-3:], bvh)
@@ -253,7 +254,7 @@ if __name__ == '__main__':
     
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
-    iteration = 200
+    iteration = 300
     epoch = 0
     p0_iteration, p1_iteration = 60, 20
     loss_history = {'train':[], 'test':[]}
@@ -283,7 +284,8 @@ if __name__ == '__main__':
         shuffle = True)
     
     loss_MSE = torch.nn.MSELoss(reduction = 'sum')
-    loss_KLD = lambda mu,sigma: -0.5 * torch.sum(1 + torch.log(sigma**2) - mu.pow(2) - sigma**2)
+    loss_KLD = lambda mu,logvar : -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).sum().clamp(max=0)/logvar.numel()
+       # lambda mu,sigma:-0.5 * torch.sum(1 + torch.log(sigma**2) - mu.pow(2) - sigma**2)
 
 
 
@@ -307,7 +309,9 @@ if __name__ == '__main__':
         beta_VAE2 = beta_VAE / beta_grow_round * (divmod(epoch, beta_grow_round)[1]+1)
         for motions, root_ori, root_pos in train_loader:
             x = motions [:, 0, :]
+            
             #root_ori, root_pos = root_ori.clone().detach().numpy(), root_pos.clone().detach().numpy()
+            loss = torch.tensor(0).to(torch.float32).to(device)
             for i in range (1, clip_size):
                 re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                 
@@ -322,28 +326,28 @@ if __name__ == '__main__':
 
                 #loss_para = # torch.sum (torch.mul (moemoepara, moemoepara), dim = (0, 1, 2))
                 loss_norm = loss_KLD(mu, sigma)
-                loss = loss_re + beta_VAE2 * loss_norm + beta_moe * loss_moe #+ beta_para * loss_para
+                loss += loss_re + beta_VAE2 * loss_norm + beta_moe * loss_moe #+ beta_para * loss_para
            
                 tot_loss_re += loss_re.item()
-                tot_loss_norm += beta_VAE2 * loss_norm.item()
-                #tot_loss_moe += beta_moe * loss_moe.item()
-                #tot_loss_para += beta_para * loss_para.item()
-                train_nsample += (clip_size-1) * batch_size
-                train_loss += loss.item()
-            
-                loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
-                
+                tot_loss_norm += loss_norm.item()
+                #tot_loss_moe += loss_moe.item()
+                #tot_loss_para += loss_para.item()
+        
                 
                 if (random.random() < teacher_p):
                     x = motions[:, i, :]
                 else:
-                    x = re_x.detach()
+                    x = re_x
                     
+            
             train_loss += loss.item()
             train_nsample += batch_size * (clip_size - 1)
             t.set_postfix({'loss':train_loss/train_nsample})
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+                
             
         loss_history['train'].append(train_loss/train_nsample)
         
@@ -377,3 +381,20 @@ if __name__ == '__main__':
         print ("iteration %d/%d, train_loss: %f", epoch, iteration, train_loss/train_nsample)
         
     
+    
+'''
+def transform_as_predict (o):
+    return [o[:, :predicted_sizes[0]],\
+        o[:, input_sizes[0]:input_sizes[0] + predicted_sizes[1]]]
+
+
+def compute_joint_orientation (x, root_ori, root_pos, bvh, bs):
+    joint_position, joint_orientation = [root_pos], [root_ori]
+    
+    root_ori2 = R(root_ori)
+    
+    for i in range(0, joint_num - 1):
+        joint_position.append(root_ori2.apply(x[bs+i*3:bs+i*3+3]) + root_pos)
+        joint_orientation.append((root_ori2 * R(x[i*4:i*4+4])).as_quat())
+    return joint_orientation
+'''
