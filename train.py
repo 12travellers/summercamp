@@ -24,7 +24,7 @@ used_motions = 2
 clip_size = 16
 batch_size = 128
 learning_rate = 4e-5
-beta_VAE = 1
+beta_VAE = 0.4
 beta_grow_round = 1
 beta_para = 0
 beta_moe = 0.4
@@ -91,17 +91,17 @@ def transform_bvh (bvh):
         root_ori = orientation[i, 0, :]
         root_ori2 = R(root_ori).inv()
         
-        #for j in range(1, len(bvh._skeleton_joints)):
-        #    translation.append (root_ori2.apply(position[i, j] - position[i, 0]))
-        #    motion.append (quat_product(root_ori, orientation[i, j], inv_p=True))
+        for j in range(1, len(bvh._skeleton_joints)):
+            translation.append (root_ori2.apply(position[i, j] - position[i, 0]))
+            motion.append (quat_product(root_ori, orientation[i, j], inv_p=True))
         
         for j in range(0, len(bvh._skeleton_joints)):
             if (j == 0):
                 translation.append (linear_velocity[i, j])
                 motion.append (angular_velocity[i, j])
             else:
-                translation.append (root_ori2.apply(linear_velocity[i, j]))
-                motion.append (quat_product(root_ori, add02av(angular_velocity[i, j]), inv_p=True))
+                translation.append (linear_velocity[i, j])
+                motion.append (angular_velocity[i, j])
             if (j == 0 and predicted_size == None):
                 predicted_sizes = [\
                     np.concatenate (motion, axis = -1).shape[-1],\
@@ -140,11 +140,13 @@ def compute_motion_info (x, root_pos, root_ori, jtb, jrb, bvh):
     bt = predicted_sizes[0]
     for i in range(0, joint_num - 1):
         jt.append(root_ori2.apply(x[bs+i*3:bs+i*3+3])/ bvh._fps + jtb[i+1])
+        '''    
         v = quat_product(root_ori, x[bt+i*4:bt+i*4+4])
         #print(v)
         v = quat_product(v, jrb[i+1]) / bvh._fps / 2 + jrb[i+1]
         v = v / np.linalg.norm(v,axis=0,ord=2)
-        jr.append(v)
+        '''
+        jr.append(calc_root_ori(jrb[i+1],x[bt+i*3:bt+i*3+3],bvh))
     return jt, jr
     '''
 def compute_motion_info (x, root_ori, root_pos, bvh, bs):
