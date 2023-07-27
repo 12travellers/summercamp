@@ -13,29 +13,7 @@ import random
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 
-output_path = "./output"
-data_path = "./walk1_subject5.bvh"
-used_angles = 0
-used_motions = 2
-clip_size = 16
-batch_size = 32
-learning_rate = 4e-6
-beta_VAE = 2
-beta_grow_round = 10
-beta_para = 0
-beta_moe = 0.4
-h1 = 512
-h2 = 256
-moemoechu = 4
-latent_size = 256
-beta_trans = 4
-joint_num = 25
-predicted_size = None
-predicted_sizes = None
-input_size = None
-input_sizes = None
-num_frames = None
-
+from train import *
 
 
 if __name__ == '__main__':
@@ -60,11 +38,11 @@ if __name__ == '__main__':
     bvh.recompute_joint_global_info ()
     jt, jr = bvh.joint_translation[-1], bvh._joint_rotation[-1]
     
-    if False:
-        root_ori_b, root_ori = bvh._joint_orientation[-2,0],  bvh._joint_orientation[-1,0]
-        angular_velocity = bvh.compute_angular_velocity (False)[-1, 0]
-        print(train.calc_root_ori(root_ori_b, angular_velocity, bvh))
-        print(root_ori)
+    if True:
+        for i in range(10):
+            root_ori_b, root_ori = bvh._joint_orientation[-2,i],  bvh._joint_orientation[-1,i]
+            angular_velocity = bvh.compute_angular_velocity (False)[-1, i]
+            print(i,":",train.calc_root_ori(root_ori_b, angular_velocity, bvh), root_ori)
     
     
     
@@ -91,11 +69,6 @@ if __name__ == '__main__':
     x = x.reshape([1] + list(x.shape))
     anime_time = 1000
     root_ori, root_pos = root_info[-1][0], root_info[-1][1]
-
-    
-    bvh = BVHLoader.load (data_path).sub_sequence(514,516)
-    bvh.recompute_joint_global_info ()
-    jt, jr = bvh._joint_translation[-1], bvh._joint_rotation[-1]
     
     
     while anime_time > 0:
@@ -105,7 +78,7 @@ if __name__ == '__main__':
         re_x, moe_output = VAE.decoder (x, z)
         
         #test basic function
-        #re_x = torch.from_numpy(inputs[1000-anime_time])
+        #re_x = torch.from_numpy(inputs[514+1000-anime_time])
         #re_x = re_x.reshape([1] + list(re_x.shape))
     
         x = x.numpy()
@@ -130,6 +103,7 @@ if __name__ == '__main__':
     BVHLoader.save(bvh.sub_sequence(0, bvh.num_frames), './infered.bvh')
     
     os.system("python -m pymotionlib.editor")
+    os.system("tensorboard --logdir=./runs")
     
 
         

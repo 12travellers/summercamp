@@ -24,8 +24,8 @@ used_motions = 2
 clip_size = 16
 batch_size = 128
 learning_rate = 4e-5
-beta_VAE = 0.4
-beta_grow_round = 1
+beta_VAE = 0.6
+beta_grow_round = 4
 beta_para = 0
 beta_moe = 0.4
 h1 = 512
@@ -34,7 +34,7 @@ moemoechu = 4
 latent_size = 256
 beta_trans = 4
 joint_num = 25
-beta_predict = 0.8
+beta_predict = 0.7
 predicted_size = None
 predicted_sizes = None
 input_size = None
@@ -42,6 +42,7 @@ input_sizes = None
 num_frames = None
 
 def add02av(angular_velocity):
+    angular_velocity/=np.linalg.norm(angular_velocity)
     return np.concatenate([angular_velocity, np.asarray([0])], axis=-1)
 
 
@@ -63,8 +64,8 @@ class motion_data_set(torch.utils.data.Dataset):
 
 
 def move_to_01 (data):
-    #_min, _max = np.mean(data,axis=(0,1)), np.std(data,axis=(0,1))+np.mean(data,axis=(0,1))
-    _min, _max = np.min(data, axis = (0,1)), np.max(data, axis = (0,1))
+    _min, _max = np.mean(data,axis=(0,1)), np.std(data,axis=(0,1))+np.mean(data,axis=(0,1))
+    #_min, _max = np.min(data, axis = (0,1)), np.max(data, axis = (0,1))
     return (data - _min) / (_max - _min), _min, _max
 def move_input_to01(x, motions_max, motions_min, translations_max, translations_min, bs):
     x[:, :bs] = (x[:, :bs] - motions_min)/(motions_max-motions_min)
@@ -129,9 +130,10 @@ def transform_bvh (bvh):
     return motions, translations, root_info
 
 def calc_root_ori(root_ori, angular_velocity, bvh):
-    angular_velocity = R(root_ori).apply(angular_velocity)
-    v = root_ori + angular_velocity / bvh._fps / 2
-    v = v / np.linalg.norm(v,axis=0,ord=2)
+    angular_velocity = quat_product(root_ori,add02av(angular_velocity))/2
+    #angular_velocity = R.from_rotvec(angular_velocity).as_quat()/2
+    v = root_ori + angular_velocity / bvh._fps 
+    v = v / np.linalg.norm(v)
     return v
 
 def compute_motion_info (x, root_pos, root_ori, jtb, jrb, bvh):
@@ -149,36 +151,232 @@ def compute_motion_info (x, root_pos, root_ori, jtb, jrb, bvh):
         '''
         jr.append(calc_root_ori(jrb[i+1],root_ori2.apply(x[bt+i*3:bt+i*3+3]),bvh))
     return jt, jr
-    '''
-def compute_motion_info (x, root_ori, root_pos, bvh, bs):
+def transform_root_from_input (x, root_ori_b, root_pos_b, bvh):
+    ori, pos = x [:predicted_sizes[0]], x[input_sizes[0]:input_sizes[0]+predicted_sizes[1]]
+    root_ori = calc_root_ori(root_ori_b, ori[-3:], bvh)
+    root_pos = root_pos_b + pos[-3:]/bvh._fps
+    return root_ori, root_pos
+
+if __name__ == '__main__':
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print ("train model on device:" + str(device))
+    
+    make_new = False
+    if (len(sys.argv) > 1):
+        if (sys.argv[1] == 'new'):
+            make_new =  True
+    
+    
+    bvh = BVHLoader.load (data_path)
+    bvh = bvh.sub_sequence(400)
+    print("read " + str(bvh.num_frames) + " motions from " + data_path)
+    
+    motions, translations, root_info = transform_bvh(bvh)
+    
+    
+    
+    _motions, motions_min, motions_max = move_to_01 (motions)
+    _translations, translations_min, translations_max = move_to_01 (translations)
+    translations_min = motions_min = min(translations_min, motions_min)
+    translations_max = motions_max = min(translations_max, motions_max)
+    
+    motions = (motions - motions_min) / (motions_max - motions_min)
+    translations = (translations - translations_min) / (translations_max - translations_min)
+    
+    inputs = np.concatenate ([motions, translations], axis = 1)
+    assert (input_size == inputs.shape [1])
+    
+    train_motions, test_motions = train_test_split(inputs, test_size = 0.01)
+    
+    
+    encoder = model.VAE_encoder (input_size, used_motions, h1, h2, latent_size)
+    decoder = model.VAE_decoder (input_size, used_motions, latent_size, input_size, h2, h1, moemoechu)
+    
+    VAE = model.VAE(encoder, decoder).to(device)
+    optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
+    iteration = 150
+    epoch = 0
+    p0_iteration, p1_iteration = 60, 20
+    loss_history = {'train':[], 'test':[]}
+    
+    try:
+        assert (False == make_new)
+        checkpoint = torch.load (output_path + '/final_model.pth')
+        VAE.load_state_dict (checkpoint['model'])
+        epoch = checkpoint ['epoch']
+        loss_history = checkpoint ['loss_history']
+        optimizer = checkpoint ['optimizer']
+        print ("loading model from " + output_path + '/final_model.pth')
+    except:
+        try:
+            shutil.rmtree("runs/vae")
+        except:
+            None
+        print ("no training history found... rebuild another model...")
+        
+    writer = SummaryWriter(log_dir='runs/vae')
+    
+    
+    train_loader = torch.utils.data.DataLoader(\
+        dataset = motion_data_set (train_motions, root_info),\
+        batch_size = batch_size,\
+        drop_last = True,\
+        shuffle = True)
+    test_loader = torch.utils.data.DataLoader(\
+        dataset = motion_data_set (test_motions, root_info),\
+        batch_size = batch_size,\
+        drop_last = True,\
+        shuffle = False)
+    
+    loss_MSE = torch.nn.MSELoss(reduction = 'sum')
+    loss_KLD = lambda mu,logvar : -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).sum().clamp(max=0)/logvar.numel()
+       # lambda mu,sigma:-0.5 * torch.sum(1 + torch.log(sigma**2) - mu.pow(2) - sigma**2)
+
+
+
+
+    while (epoch < iteration):
+        teacher_p = (p0_iteration - epoch) / (p0_iteration - p1_iteration)
+
+        #teacher_p = 0
+        
+        ##
+        epoch += 1 
+        
+        t = tqdm (train_loader, desc = f'[train]epoch:{epoch}')
+        train_loss, train_nsample = 0, 0
+        tot_loss_re, tot_loss_norm, tot_loss_moe, tot_loss_para = 0,0,0,0
+        tot_loss_re1, tot_loss_re2 = 0,0
+        
+        #beta_VAE2 = beta_VAE
+        beta_VAE2 = beta_VAE / beta_grow_round * (divmod(epoch, beta_grow_round)[1]+1)
+        for motions, root_ori, root_pos in train_loader:
+            x = motions [:, 0, :]
+            for i in range (1, clip_size):
+                re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
+                
+                loss_re1 = loss_MSE(re_x, motions [:, i, :])
+                k1 = slice(predicted_sizes[0]-3, input_sizes[0], 1)
+                k2 = slice(input_sizes[0]+predicted_sizes[1]-3, input_size, 1)
+                loss_re2 = loss_MSE(re_x[:, k1], motions [:, i, k1]) + loss_MSE(re_x[:, k2], motions [:, i, k2])
+                loss_re = loss_re1 * (1-beta_predict) + loss_re2 * beta_predict
+                loss_moe = 0
+                
+                moemoe, moemoepara = moe_output
+                #for j in range(moemoechu):
+                #    re = torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :])
+                #    gtp = torch.mul(moemoepara[:, :, j:j+1], gt).to(torch.float32)
+                #    loss_moe += loss_MSE(re, gtp)
+
+                #loss_para = # torch.sum (torch.mul (moemoepara, moemoepara), dim = (0, 1, 2))
+                loss_norm = loss_KLD(mu, sigma)
+                loss = loss_re + beta_VAE2 * loss_norm + beta_moe * loss_moe #+ beta_para * loss_para
+           
+                tot_loss_re += loss_re.item()
+                tot_loss_norm += loss_norm.item()
+                tot_loss_re1 += loss_re1.item()
+                tot_loss_re2 += loss_re2.item()
+                #tot_loss_moe += loss_moe.item()
+                #tot_loss_para += loss_para.item()
+                train_loss += loss.item()
+                
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                
+                if (random.random() < teacher_p):
+                    x = motions[:, i, :]
+                else:
+                    x = re_x.detach()
+                
+                
+            train_nsample += batch_size * (clip_size - 1)
+            t.set_postfix({'loss':train_loss/train_nsample})
+        
+        #####-------revue-------#####
+        #i dont want to admit that, but i do mix up the test and val part...
+        tot_loss_re_val, tot_loss_norm_val = 0,0
+        test_nsample = 0
+        for motions, root_ori, root_pos in test_loader:
+            x = motions [:, 0, :]
+            for i in range (1, clip_size):
+                re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
+                
+                loss_re1 = loss_MSE(re_x, motions [:, i, :])
+                k1 = slice(predicted_sizes[0]-3, input_sizes[0], 1)
+                k2 = slice(input_sizes[0]+predicted_sizes[1]-3, input_size, 1)
+                loss_re2 = loss_MSE(re_x[:, k1], motions [:, i, k1]) + loss_MSE(re_x[:, k2], motions [:, i, k2])
+                loss_re = loss_re1 * (1-beta_predict) + loss_re2 * beta_predict
+                loss_norm = loss_KLD(mu, sigma)
+
+                tot_loss_re_val += loss_re.item()
+                tot_loss_norm_val += loss_norm.item()
+                
+                x = re_x.detach()
+            test_nsample += batch_size * (clip_size - 1)
+
+                
+                
+        test_loss = (tot_loss_re_val+beta_VAE*tot_loss_norm_val)
+        loss_history['test'].append(test_loss/test_nsample )
+        
+        writer.add_scalar(tag="loss_re",
+            scalar_value=tot_loss_re/train_nsample,
+            global_step=epoch)
+        writer.add_scalar(tag="loss_norm",
+            scalar_value=tot_loss_norm/train_nsample,
+            global_step=epoch)
+        writer.add_scalar(tag="loss_re1",
+            scalar_value=tot_loss_re1/train_nsample,
+            global_step=epoch)
+        writer.add_scalar(tag="loss_re2",
+            scalar_value=tot_loss_re2/train_nsample,
+            global_step=epoch)
+        
+        writer.add_scalar(tag="loss_norm_val",
+            scalar_value=tot_loss_norm_val/test_nsample,
+            global_step=epoch)
+        writer.add_scalar(tag="loss_re_val",
+            scalar_value=tot_loss_re_val/test_nsample,
+            global_step=epoch)
+        
+                  
+        state = {'model': VAE.state_dict(),\
+                    'epoch': epoch,\
+                    'loss_history': loss_history,\
+                    'optimizer': optimizer,\
+                    'input_size': input_size,\
+                    'input_sizes': input_sizes,\
+                    'predicted_size': predicted_size,\
+                    'predicted_sizes': predicted_sizes,\
+                    'motions_min': motions_min,\
+                    'motions_max': motions_max,\
+                    'translations_min': translations_min,\
+                    'translations_max': translations_max,\
+                    }
+        torch.save(state, output_path+'/final_model.pth')
+        print ("iteration %d/%d, train_loss: %f, test_loss: %f", epoch, iteration, train_loss/train_nsample,\
+            test_loss/test_nsample)
+        
+    
+    
+'''
+def transform_as_predict (o):
+    return [o[:, :predicted_sizes[0]],\
+        o[:, input_sizes[0]:input_sizes[0] + predicted_sizes[1]]]
+
+
+def compute_joint_orientation (x, root_ori, root_pos, bvh, bs):
     joint_position, joint_orientation = [root_pos], [root_ori]
     
     root_ori2 = R(root_ori)
     
     for i in range(0, joint_num - 1):
         joint_position.append(root_ori2.apply(x[bs+i*3:bs+i*3+3]) + root_pos)
-        joint_orientation.append(quat_product(root_ori, x[i*4:i*4+4]))
-        
-    joint_translation, joint_rotation = None, None
-    joint_translation, joint_rotation =\
-        bvh.compute_joint_local_info ([joint_position], [joint_orientation], joint_translation, joint_rotation)
-    return joint_translation[0], joint_rotation[0]
-    '''
+        joint_orientation.append((root_ori2 * R(x[i*4:i*4+4])).as_quat())
+    return joint_orientation
 
 
-'''
-def transform_root (re_x, root_ori_b, root_pos_b, bvh):
-    ori, pos = re_x [:predicted_sizes[0]], re_x[predicted_sizes[0]:]
-    root_ori = calc_root_ori(root_ori_b, ori[-3:], bvh)
-    root_pos = root_pos_b + pos[-3:]/bvh._fps
-    return root_ori, root_pos
-'''
-def transform_root_from_input (x, root_ori_b, root_pos_b, bvh):
-    ori, pos = x [:predicted_sizes[0]], x[input_sizes[0]:input_sizes[0]+predicted_sizes[1]]
-    root_ori = calc_root_ori(root_ori_b, ori[-3:], bvh)
-    root_pos = root_pos_b + pos[-3:]/bvh._fps
-    return root_ori, root_pos
-'''
 def transform_as_input (x, re_x, root_ori_b, root_pos_b, bvh):
     def compute_angular_velocity(_joint_orientation):
         qd = np.diff(_joint_orientation, axis=0) * bvh._fps
@@ -224,187 +422,24 @@ def transform_as_input (x, re_x, root_ori_b, root_pos_b, bvh):
     
     return torch.concat ([torch.tensor(ori[:-3])] + extra_r +\
                          [torch.tensor(pos[:-3])] + extra_t, dim = -1)
-    
-'''
-if __name__ == '__main__':
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print ("train model on device:" + str(device))
-    
-    make_new = False
-    if (len(sys.argv) > 1):
-        if (sys.argv[1] == 'new'):
-            make_new =  True
-    
-    
-    bvh = BVHLoader.load (data_path)
-    bvh = bvh.sub_sequence(250)
-    print("read " + str(bvh.num_frames) + " motions from " + data_path)
-    
-    motions, translations, root_info = transform_bvh(bvh)
-    
-    
-    motions, motions_min, motions_max = move_to_01 (motions)
-    translations, translations_min, translations_max = move_to_01 (translations)
-    
-    inputs = np.concatenate ([motions, translations], axis = 1)
-    assert (input_size == inputs.shape [1])
-    
-    #train_motions, test_motions = train_test_split(inputs, test_size = 0.01)
-    train_motions = inputs
-    
-    encoder = model.VAE_encoder (input_size, used_motions, h1, h2, latent_size)
-    decoder = model.VAE_decoder (input_size, used_motions, latent_size, input_size, h2, h1, moemoechu)
-    
-    VAE = model.VAE(encoder, decoder).to(device)
-    optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
-    iteration = 300
-    epoch = 0
-    p0_iteration, p1_iteration = 60, 20
-    loss_history = {'train':[], 'test':[]}
-    
-    try:
-        assert (False == make_new)
-        checkpoint = torch.load (output_path + '/final_model.pth')
-        VAE.load_state_dict (checkpoint['model'])
-        epoch = checkpoint ['epoch']
-        loss_history = checkpoint ['loss_history']
-        optimizer = checkpoint ['optimizer']
-        print ("loading model from " + output_path + '/final_model.pth')
-    except:
-        try:
-            shutil.rmtree("runs/vae")
-        except:
-            None
-        print ("no training history found... rebuild another model...")
-        
-    writer = SummaryWriter(log_dir='runs/vae')
-    
-    
-    train_loader = torch.utils.data.DataLoader(\
-        dataset = motion_data_set (train_motions, root_info),\
-        batch_size = batch_size,\
-        drop_last = True,\
-        shuffle = True)
-    
-    loss_MSE = torch.nn.MSELoss(reduction = 'sum')
-    loss_KLD = lambda mu,logvar : -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).sum().clamp(max=0)/logvar.numel()
-       # lambda mu,sigma:-0.5 * torch.sum(1 + torch.log(sigma**2) - mu.pow(2) - sigma**2)
 
-
-
-
-    while (epoch < iteration):
-        teacher_p = 0
-        if (epoch < p0_iteration):
-            teacher_p = (p0_iteration - epoch) / (p0_iteration - p1_iteration)
-        if(epoch < p1_iteration):
-            teacher_p = 1
-        #teacher_p = 0
-        
-        ##
-        epoch += 1 
-        
-        t = tqdm (train_loader, desc = f'[train]epoch:{epoch}')
-        train_loss, train_nsample = 0, 0
-        tot_loss_re, tot_loss_norm, tot_loss_moe, tot_loss_para = 0,0,0,0
-        tot_loss_re1, tot_loss_re2 = 0,0
-        
-        #beta_VAE2 = beta_VAE
-        beta_VAE2 = beta_VAE / beta_grow_round * (divmod(epoch, beta_grow_round)[1]+1)
-        for motions, root_ori, root_pos in train_loader:
-            x = motions [:, 0, :]
-            
-            #root_ori, root_pos = root_ori.clone().detach().numpy(), root_pos.clone().detach().numpy()
-            loss = torch.tensor(0).to(torch.float32).to(device)
-            for i in range (1, clip_size):
-                re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
-                
-                loss_re1 = loss_MSE(re_x, motions [:, i, :])
-                k1 = slice(predicted_sizes[0]-3, input_sizes[0], 1)
-                k2 = slice(input_sizes[0]+predicted_sizes[1]-3, input_size, 1)
-                loss_re2 = loss_MSE(re_x[k1], motions [:, i, k1]) + loss_MSE(re_x[k2], motions [:, i, k2])
-                loss_re = loss_re1 * (1-beta_predict) + loss_re2 * beta_predict
-                loss_moe = 0
-                
-                moemoe, moemoepara = moe_output
-                #for j in range(moemoechu):
-                #    re = torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :])
-                #    gtp = torch.mul(moemoepara[:, :, j:j+1], gt).to(torch.float32)
-                #    loss_moe += loss_MSE(re, gtp)
-
-                #loss_para = # torch.sum (torch.mul (moemoepara, moemoepara), dim = (0, 1, 2))
-                loss_norm = loss_KLD(mu, sigma)
-                loss += loss_re + beta_VAE2 * loss_norm + beta_moe * loss_moe #+ beta_para * loss_para
-           
-                tot_loss_re += loss_re.item()
-                tot_loss_norm += loss_norm.item()
-                tot_loss_re1 += loss_re1.item()
-                tot_loss_re2 += loss_re2.item()
-                #tot_loss_moe += loss_moe.item()
-                #tot_loss_para += loss_para.item()
-        
-                
-                if (random.random() < teacher_p):
-                    x = motions[:, i, :]
-                else:
-                    x = re_x
-                    
-            
-            train_loss += loss.item()
-            train_nsample += batch_size * (clip_size - 1)
-            t.set_postfix({'loss':train_loss/train_nsample})
-            
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-                
-            
-        loss_history['train'].append(train_loss/train_nsample)
-        
-        writer.add_scalar(tag="loss_re",
-            scalar_value=tot_loss_re/train_nsample,
-            global_step=epoch)
-        writer.add_scalar(tag="loss_norm",
-            scalar_value=tot_loss_norm/train_nsample,
-            global_step=epoch)
-        writer.add_scalar(tag="loss_re1",
-            scalar_value=tot_loss_re1/train_nsample,
-            global_step=epoch)
-        writer.add_scalar(tag="loss_re2",
-            scalar_value=tot_loss_re2/train_nsample,
-            global_step=epoch)
-                  
-        state = {'model': VAE.state_dict(),\
-                    'epoch': epoch,\
-                    'loss_history': loss_history,\
-                    'optimizer': optimizer,\
-                    'input_size': input_size,\
-                    'input_sizes': input_sizes,\
-                    'predicted_size': predicted_size,\
-                    'predicted_sizes': predicted_sizes,\
-                    'motions_min': motions_min,\
-                    'motions_max': motions_max,\
-                    'translations_min': translations_min,\
-                    'translations_max': translations_max,\
-                    }
-        torch.save(state, output_path+'/final_model.pth')
-        print ("iteration %d/%d, train_loss: %f", epoch, iteration, train_loss/train_nsample)
-        
-    
-    
-'''
-def transform_as_predict (o):
-    return [o[:, :predicted_sizes[0]],\
-        o[:, input_sizes[0]:input_sizes[0] + predicted_sizes[1]]]
-
-
-def compute_joint_orientation (x, root_ori, root_pos, bvh, bs):
+def compute_motion_info (x, root_ori, root_pos, bvh, bs):
     joint_position, joint_orientation = [root_pos], [root_ori]
     
     root_ori2 = R(root_ori)
     
     for i in range(0, joint_num - 1):
         joint_position.append(root_ori2.apply(x[bs+i*3:bs+i*3+3]) + root_pos)
-        joint_orientation.append((root_ori2 * R(x[i*4:i*4+4])).as_quat())
-    return joint_orientation
+        joint_orientation.append(quat_product(root_ori, x[i*4:i*4+4]))
+        
+    joint_translation, joint_rotation = None, None
+    joint_translation, joint_rotation =\
+        bvh.compute_joint_local_info ([joint_position], [joint_orientation], joint_translation, joint_rotation)
+    return joint_translation[0], joint_rotation[0]
+
+def transform_root (re_x, root_ori_b, root_pos_b, bvh):
+    ori, pos = re_x [:predicted_sizes[0]], re_x[predicted_sizes[0]:]
+    root_ori = calc_root_ori(root_ori_b, ori[-3:], bvh)
+    root_pos = root_pos_b + pos[-3:]/bvh._fps
+    return root_ori, root_pos
 '''
