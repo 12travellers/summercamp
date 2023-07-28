@@ -89,6 +89,7 @@ if __name__ == '__main__':
                 
    
         root_ori, root_pos = train.transform_root_from_input(re_x[0], root_ori, root_pos, bvh)
+        
         jt_b, jr_b = jt, jr
         jt, jr = train.compute_motion_info(re_x[0], root_pos, root_ori, jt, jr, bvh)
         

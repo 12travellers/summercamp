@@ -43,9 +43,9 @@ class VAE_decoder (torch.nn.Module):
         self.l2 = torch.nn.ModuleList([torch.nn.Linear(h1 + latent_size, h2) for i in range(self.moe)])
         self.l3 = torch.nn.ModuleList([torch.nn.Linear(h2 + latent_size, predicted_size) for i in range(self.moe)])
 
-        self.gate1 = torch.nn.Linear (self.input_size, h1, bias = True)
-        self.gate2 = torch.nn.Linear (h1, h2, bias = True)
-        self.gate3 = torch.nn.Linear (h2, self.moe, bias = True)
+        self.gate1 = torch.nn.Linear (self.input_size, 64, bias = True)
+        self.gate2 = torch.nn.Linear (64, 64, bias = True)
+        self.gate3 = torch.nn.Linear (64, self.moe, bias = True)
 
         
     def forward (self, motions, z, angles = torch.zeros(1, 0)):

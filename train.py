@@ -22,19 +22,19 @@ data_path = "./walk1_subject5.bvh"
 used_angles = 0
 used_motions = 2
 clip_size = 16
-batch_size = 128
-learning_rate = 4e-5
-beta_VAE = 0.06
-beta_grow_round = 4
+batch_size = 64
+learning_rate = 6e-5
+beta_VAE = 0.02
+beta_grow_round = 1
 beta_para = 0
 beta_moe = 0.4
-h1 = 512
-h2 = 256
-moemoechu = 4
-latent_size = 64
+h1 = 256
+h2 = 128
+moemoechu = 1
+latent_size = 32
 beta_trans = 4
 joint_num = 25
-beta_predict = 0.3
+beta_predict = 0.4
 predicted_size = None
 predicted_sizes = None
 input_size = None
@@ -64,7 +64,7 @@ class motion_data_set(torch.utils.data.Dataset):
 
 
 def move_to_01 (data):
-    _min, _max = np.mean(data,axis=(0,1)), np.std(data,axis=(0,1))+np.mean(data,axis=(0,1))
+    _min, _max = np.mean(data,axis=(0)), np.std(data,axis=(0))+np.mean(data,axis=(0))+0.1
     #_min, _max = np.min(data, axis = (0,1)), np.max(data, axis = (0,1))
     return (data - _min) / (_max - _min), _min, _max
 def move_input_to01(x, motions_max, motions_min, translations_max, translations_min, bs):
@@ -143,7 +143,7 @@ def calc_root_ori(root_ori, angular_velocity, bvh):
 '''
 def compute_motion_info (x, root_pos, root_ori, jtb, jrb, bvh):
     joint_position, joint_orientation = [root_pos], [root_ori]
-    
+    print(root_ori)
     root_ori2 = R(root_ori)
     bs = input_sizes[0]
     
@@ -191,10 +191,10 @@ if __name__ == '__main__':
     
     
     
-    _motions, motions_min, motions_max = move_to_01 (motions)
-    _translations, translations_min, translations_max = move_to_01 (translations)
-    translations_min = motions_min = min(translations_min, motions_min)
-    translations_max = motions_max = min(translations_max, motions_max)
+    _motions, motions_min, motions_max = move_to_01 (np.concatenate([motions,translations],axis=-1))
+    #_translations, translations_min, translations_max = move_to_01 (translations)
+    translations_min = motions_min
+    translations_max = motions_max
     
     motions = (motions - motions_min) / (motions_max - motions_min)
     translations = (translations - translations_min) / (translations_max - translations_min)
@@ -210,9 +210,9 @@ if __name__ == '__main__':
     
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
-    iteration = 200
+    iteration = 150
     epoch = 0
-    p0_iteration, p1_iteration = 60, 20
+    p0_iteration, p1_iteration = 50, 20
     loss_history = {'train':[], 'test':[]}
     
     try:
@@ -237,7 +237,7 @@ if __name__ == '__main__':
         dataset = motion_data_set (train_motions, root_info),\
         batch_size = batch_size,\
         drop_last = True,\
-        shuffle = True)
+        shuffle = False)
     test_loader = torch.utils.data.DataLoader(\
         dataset = motion_data_set (test_motions, root_info),\
         batch_size = batch_size,\
@@ -250,13 +250,8 @@ if __name__ == '__main__':
 
 
 
-
     while (epoch < iteration):
         teacher_p = (p0_iteration - epoch) / (p0_iteration - p1_iteration)
-
-        #teacher_p = 0
-        
-        ##
         epoch += 1 
         
         t = tqdm (train_loader, desc = f'[train]epoch:{epoch}')
@@ -269,6 +264,7 @@ if __name__ == '__main__':
         for motions, root_ori, root_pos in train_loader:
             gt = move01(motions)
             x = motions [:, 0, :]
+
             for i in range (1, clip_size):
                 re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                 
@@ -280,12 +276,7 @@ if __name__ == '__main__':
                 loss_moe = 0
                 
                 moemoe, moemoepara = moe_output
-                #for j in range(moemoechu):
-                #    re = torch.mul(moemoepara[:, :, j:j+1], moemoe[j, : :])
-                #    gtp = torch.mul(moemoepara[:, :, j:j+1], gt).to(torch.float32)
-                #    loss_moe += loss_MSE(re, gtp)
-
-                #loss_para = # torch.sum (torch.mul (moemoepara, moemoepara), dim = (0, 1, 2))
+                
                 loss_norm = loss_KLD(mu, sigma)
                 loss = loss_re + beta_VAE2 * loss_norm + beta_moe * loss_moe #+ beta_para * loss_para
            
