@@ -34,7 +34,7 @@ moemoechu = 4
 latent_size = 256
 beta_trans = 4
 joint_num = 25
-beta_predict = 0.7
+beta_predict = 0.3
 predicted_size = None
 predicted_sizes = None
 input_size = None
@@ -79,12 +79,12 @@ def move_input_from01(x, motions_max, motions_min, translations_max, translation
 def transform_bvh (bvh):
     global predicted_size, predicted_sizes, input_size, input_sizes, num_frames
     #assume root is at index 0
-    
+    bvh._joint_position, bvh._joint_orientation = None,None
     bvh = bvh.recompute_joint_global_info()
     
     linear_velocity = bvh.compute_linear_velocity (False)
     angular_velocity = bvh.compute_angular_velocity (False)
-    position, orientation = bvh._joint_position, bvh._joint_orientation
+    position, orientation = 1*bvh._joint_position, 1*bvh._joint_orientation
     
     motions, translations = [], []
     num_frames = bvh.num_frames
@@ -194,7 +194,7 @@ if __name__ == '__main__':
     
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
-    iteration = 150
+    iteration = 200
     epoch = 0
     p0_iteration, p1_iteration = 60, 20
     loss_history = {'train':[], 'test':[]}

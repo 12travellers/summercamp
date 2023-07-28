@@ -2,7 +2,7 @@ import model
 import train
 import torch
 import pymotionlib
-from pymotionlib import BVHLoader
+from pymotionlib import BVHLoader, MotionData
 import numpy as np
 import os
 from scipy.spatial.transform import Rotation as R
@@ -67,7 +67,7 @@ if __name__ == '__main__':
     
     x = torch.from_numpy (inputs[-1])
     x = x.reshape([1] + list(x.shape))
-    anime_time = 1000
+    anime_time = 200
     root_ori, root_pos = root_info[-1][0], root_info[-1][1]
     
     
@@ -89,13 +89,24 @@ if __name__ == '__main__':
                 
    
         root_ori, root_pos = train.transform_root_from_input(re_x[0], root_ori, root_pos, bvh)
+        jt_b, jr_b = jt, jr
         jt, jr = train.compute_motion_info(re_x[0], root_pos, root_ori, jt, jr, bvh)
-
-        
-        x=train.move_input_to01 (re_x, motions_max, motions_min, translations_max, translations_min, input_sizes[0])
-        x=torch.tensor(x).detach()
         
         bvh.append_trans_rotation (np.asarray([jt]), np.asarray([jr]))
+        #different methods
+        #bd = bvh.sub_sequence(0,-1)
+        #bd.append_trans_rotation (np.asarray([jt_b, jt]), np.asarray([jr_b, jr]))
+        motions, translations, root_info = train.transform_bvh(bvh)
+        print(motions.shape, translations.shape)
+        motions = (motions - motions_min) / (motions_max - motions_min)
+        translations = (translations - translations_min) / (translations_max - translations_min)
+        inputs = np.concatenate ([motions, translations], axis = 1)
+        x = torch.from_numpy (inputs[-1])
+        x = x.reshape([1] + list(x.shape))
+        
+        #x=train.move_input_to01 (re_x, motions_max, motions_min, translations_max, translations_min, input_sizes[0])
+        x=torch.tensor(x).detach()
+        
     #
     
     optimizer.zero_grad()
