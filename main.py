@@ -67,7 +67,7 @@ if __name__ == '__main__':
     
     x = torch.from_numpy (inputs[-1])
     x = x.reshape([1] + list(x.shape))
-    anime_time = 200
+    anime_time = 300
     root_ori, root_pos = root_info[-1][0], root_info[-1][1]
     
     
@@ -84,8 +84,8 @@ if __name__ == '__main__':
         x = x.numpy()
         re_x = re_x.detach().numpy()
         
-        x, re_x = train.move_input_from01 (x, motions_max, motions_min, translations_max, translations_min, input_sizes[0]),\
-                        train.move_input_from01(re_x, motions_max, motions_min, translations_max, translations_min, input_sizes[0])
+        x,= train.move_input_from01 (x, motions_max, motions_min, translations_max, translations_min, input_sizes[0]),
+          #      ,train.move_input_from01(re_x, motions_max, motions_min, translations_max, translations_min, input_sizes[0])
                 
    
         root_ori, root_pos = train.transform_root_from_input(re_x[0], root_ori, root_pos, bvh)

@@ -31,7 +31,7 @@ beta_moe = 0.4
 h1 = 512
 h2 = 256
 moemoechu = 4
-latent_size = 32
+latent_size = 64
 beta_trans = 4
 joint_num = 25
 beta_predict = 0.3
@@ -75,6 +75,9 @@ def move_input_from01(x, motions_max, motions_min, translations_max, translation
     x[:, :bs] = x[:, :bs] * (motions_max-motions_min) + motions_min
     x[:, bs:] = x[:, bs:] * (translations_max-translations_min) + translations_min
     return x
+def move01(x):
+    return move_input_from01(x, motions_max, motions_min,\
+        translations_max, translations_min, input_sizes[0])
 
 def transform_bvh (bvh):
     global predicted_size, predicted_sizes, input_size, input_sizes, num_frames
@@ -136,6 +139,23 @@ def calc_root_ori(root_ori, angular_velocity, bvh):
     v = v / np.linalg.norm(v)
     return v
 
+
+'''
+def compute_motion_info (x, root_pos, root_ori, jtb, jrb, bvh):
+    joint_position, joint_orientation = [root_pos], [root_ori]
+    
+    root_ori2 = R(root_ori)
+    bs = input_sizes[0]
+    
+    for i in range(0, joint_num - 1):
+        joint_position.append(root_ori2.apply(x[bs+i*3:bs+i*3+3]) + root_pos)
+        joint_orientation.append(quat_product(root_ori, x[i*4:i*4+4]))
+        
+    joint_translation, joint_rotation = None, None
+    joint_translation, joint_rotation =\
+        bvh.compute_joint_local_info ([joint_position], [joint_orientation], joint_translation, joint_rotation)
+    return joint_translation[0], joint_rotation[0]
+'''
 def compute_motion_info (x, root_pos, root_ori, jtb, jrb, bvh):
     jt, jr = [root_pos], [root_ori]
     root_ori2 = R(root_ori)
@@ -143,14 +163,10 @@ def compute_motion_info (x, root_pos, root_ori, jtb, jrb, bvh):
     bt = predicted_sizes[0]
     for i in range(0, joint_num - 1):
         jt.append(root_ori2.apply(x[bs+i*3:bs+i*3+3])/ bvh._fps + jtb[i+1])
-        '''    
-        v = quat_product(root_ori, x[bt+i*4:bt+i*4+4])
-        #print(v)
-        v = quat_product(v, jrb[i+1]) / bvh._fps / 2 + jrb[i+1]
-        v = v / np.linalg.norm(v,axis=0,ord=2)
-        '''
+
         jr.append(calc_root_ori(jrb[i+1],root_ori2.apply(x[bt+i*3:bt+i*3+3]),bvh))
     return jt, jr
+
 def transform_root_from_input (x, root_ori_b, root_pos_b, bvh):
     ori, pos = x [:predicted_sizes[0]], x[input_sizes[0]:input_sizes[0]+predicted_sizes[1]]
     root_ori = calc_root_ori(root_ori_b, ori[-3:], bvh)
@@ -249,16 +265,17 @@ if __name__ == '__main__':
         tot_loss_re1, tot_loss_re2 = 0,0
         
         #beta_VAE2 = beta_VAE
-        beta_VAE2 = beta_VAE / beta_grow_round * (divmod(epoch, beta_grow_round)[1]+1)
+        beta_VAE2 = beta_VAE / beta_grow_round * (divmod(epoch, beta_grow_round)[1])
         for motions, root_ori, root_pos in train_loader:
+            gt = move01(motions)
             x = motions [:, 0, :]
             for i in range (1, clip_size):
                 re_x, mu, sigma, moe_output = VAE(torch.concat ([x, motions [:, i, :]], dim = 1))
                 
-                loss_re1 = loss_MSE(re_x, motions [:, i, :])
+                loss_re1 = loss_MSE(re_x, gt [:, i, :])
                 k1 = slice(predicted_sizes[0]-3, input_sizes[0], 1)
                 k2 = slice(input_sizes[0]+predicted_sizes[1]-3, input_size, 1)
-                loss_re2 = loss_MSE(re_x[:, k1], motions [:, i, k1]) + loss_MSE(re_x[:, k2], motions [:, i, k2])
+                loss_re2 = loss_MSE(re_x[:, k1], gt[:, i, k1]) + loss_MSE(re_x[:, k2], gt[:, i, k2])
                 loss_re = loss_re1 * (1-beta_predict) + loss_re2 * beta_predict
                 loss_moe = 0
                 
@@ -287,12 +304,12 @@ if __name__ == '__main__':
                 if (random.random() < teacher_p):
                     x = motions[:, i, :]
                 else:
-                    x = re_x.detach()
+                    x = move_input_to01(re_x.detach(), motions_max, motions_min, translations_max, translations_min, input_sizes[0])
                 
                 
             train_nsample += batch_size * (clip_size - 1)
             t.set_postfix({'loss':train_loss/train_nsample})
-        
+        '''
         #####-------revue-------#####
         #i dont want to admit that, but i do mix up the test and val part...
         tot_loss_re_val, tot_loss_norm_val = 0,0
@@ -315,11 +332,11 @@ if __name__ == '__main__':
                 x = re_x.detach()
             test_nsample += batch_size * (clip_size - 1)
 
-                
+               
                 
         test_loss = (tot_loss_re_val+beta_VAE*tot_loss_norm_val)
         loss_history['test'].append(test_loss/test_nsample )
-        
+        ''' 
         writer.add_scalar(tag="loss_re",
             scalar_value=tot_loss_re/train_nsample,
             global_step=epoch)
@@ -332,14 +349,14 @@ if __name__ == '__main__':
         writer.add_scalar(tag="loss_re2",
             scalar_value=tot_loss_re2/train_nsample,
             global_step=epoch)
-        
+        '''
         writer.add_scalar(tag="loss_norm_val",
             scalar_value=tot_loss_norm_val/test_nsample,
             global_step=epoch)
         writer.add_scalar(tag="loss_re_val",
             scalar_value=tot_loss_re_val/test_nsample,
             global_step=epoch)
-        
+        '''
                   
         state = {'model': VAE.state_dict(),\
                     'epoch': epoch,\
@@ -356,7 +373,7 @@ if __name__ == '__main__':
                     }
         torch.save(state, output_path+'/final_model.pth')
         print ("iteration %d/%d, train_loss: %f, test_loss: %f", epoch, iteration, train_loss/train_nsample,\
-            test_loss/test_nsample)
+            0)#test_loss/test_nsample)
         
     
     
@@ -423,19 +440,6 @@ def transform_as_input (x, re_x, root_ori_b, root_pos_b, bvh):
     return torch.concat ([torch.tensor(ori[:-3])] + extra_r +\
                          [torch.tensor(pos[:-3])] + extra_t, dim = -1)
 
-def compute_motion_info (x, root_ori, root_pos, bvh, bs):
-    joint_position, joint_orientation = [root_pos], [root_ori]
-    
-    root_ori2 = R(root_ori)
-    
-    for i in range(0, joint_num - 1):
-        joint_position.append(root_ori2.apply(x[bs+i*3:bs+i*3+3]) + root_pos)
-        joint_orientation.append(quat_product(root_ori, x[i*4:i*4+4]))
-        
-    joint_translation, joint_rotation = None, None
-    joint_translation, joint_rotation =\
-        bvh.compute_joint_local_info ([joint_position], [joint_orientation], joint_translation, joint_rotation)
-    return joint_translation[0], joint_rotation[0]
 
 def transform_root (re_x, root_ori_b, root_pos_b, bvh):
     ori, pos = re_x [:predicted_sizes[0]], re_x[predicted_sizes[0]:]
