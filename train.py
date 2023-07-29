@@ -23,23 +23,27 @@ used_angles = 0
 used_motions = 2
 clip_size = 16
 batch_size = 64
-learning_rate = 6e-5
+learning_rate = 1e-4
 beta_VAE = 0.02
 beta_grow_round = 1
 beta_para = 0
 beta_moe = 0.4
 h1 = 256
 h2 = 128
-moemoechu = 1
+moemoechu = 2
 latent_size = 32
 beta_trans = 4
 joint_num = 25
-beta_predict = 0.4
+beta_predict = 0
 predicted_size = None
 predicted_sizes = None
 input_size = None
 input_sizes = None
 num_frames = None
+inputs_avg = None
+inputs_std = None
+inputs_avg_gpu = None
+inputs_std_gpu = None
 
 def add02av(angular_velocity):
     angular_velocity/=np.linalg.norm(angular_velocity)
@@ -64,22 +68,25 @@ class motion_data_set(torch.utils.data.Dataset):
 
 
 def move_to_01 (data):
-    _min, _max = np.mean(data,axis=(0)), np.std(data,axis=(0))+np.mean(data,axis=(0))+0.1
-    #_min, _max = np.min(data, axis = (0,1)), np.max(data, axis = (0,1))
-    return (data - _min) / (_max - _min), _min, _max
-def move_input_to01(x, motions_max, motions_min, translations_max, translations_min, bs):
-    x[:, :bs] = (x[:, :bs] - motions_min)/(motions_max-motions_min)
-    x[:, bs:] = (x[:, bs:] - translations_min)/(translations_max-translations_min)
+    avg,std = np.mean(data,axis=(0)), np.std(data,axis=(0))+0.1
+    data = (data - avg) / std
+    return data, avg, std
+def move_input_to01(x,gpu=False):
+    if(gpu):
+        x = (x - inputs_avg_gpu) / inputs_std_gpu
+    else:  
+        x = (x - inputs_avg) / inputs_std
     return x
-def move_input_from01(x, motions_max, motions_min, translations_max, translations_min, bs):
-    x[:, :bs] = x[:, :bs] * (motions_max-motions_min) + motions_min
-    x[:, bs:] = x[:, bs:] * (translations_max-translations_min) + translations_min
+def move_input_from01(x,gpu=False):
+    if(gpu):
+        x = x * inputs_std_gpu + inputs_avg_gpu
+    else:
+        x = x * inputs_std + inputs_avg
     return x
-def move01(x):
-    return move_input_from01(x, motions_max, motions_min,\
-        translations_max, translations_min, input_sizes[0])
 
-def transform_bvh (bvh):
+
+
+def transform_bvh (bvh, start=1):
     global predicted_size, predicted_sizes, input_size, input_sizes, num_frames
     #assume root is at index 0
     bvh._joint_position, bvh._joint_orientation = None,None
@@ -91,7 +98,7 @@ def transform_bvh (bvh):
     
     motions, translations = [], []
     num_frames = bvh.num_frames
-    for i in range(1, bvh.num_frames):
+    for i in range(start, bvh.num_frames):
         motion, translation = [], []
         root_ori = orientation[i, 0, :]
         root_ori2 = R(root_ori).inv()
@@ -107,7 +114,7 @@ def transform_bvh (bvh):
             else:
                 translation.append (root_ori2.apply(linear_velocity[i, j]))
                 motion.append (root_ori2.apply(angular_velocity[i, j]))
-            if (j == 0 and predicted_size == None):
+            if (predicted_size == None):
                 predicted_sizes = [\
                     np.concatenate (motion, axis = -1).shape[-1],\
                     np.concatenate (translation, axis = -1).shape[-1]]
@@ -186,20 +193,9 @@ if __name__ == '__main__':
     bvh = BVHLoader.load (data_path)
     bvh = bvh.sub_sequence(400)
     print("read " + str(bvh.num_frames) + " motions from " + data_path)
-    
     motions, translations, root_info = transform_bvh(bvh)
-    
-    
-    
-    _motions, motions_min, motions_max = move_to_01 (np.concatenate([motions,translations],axis=-1))
-    #_translations, translations_min, translations_max = move_to_01 (translations)
-    translations_min = motions_min
-    translations_max = motions_max
-    
-    motions = (motions - motions_min) / (motions_max - motions_min)
-    translations = (translations - translations_min) / (translations_max - translations_min)
-    
-    inputs = np.concatenate ([motions, translations], axis = 1)
+    inputs, inputs_avg, inputs_std = move_to_01 (np.concatenate([motions,translations],axis=-1))
+    inputs_avg_gpu, inputs_std_gpu = torch.tensor(inputs_avg).to(torch.float32).detach().to(device), torch.tensor(inputs_std).to(torch.float32).detach().to(device)
     assert (input_size == inputs.shape [1])
     
     train_motions, test_motions = train_test_split(inputs, test_size = 0.01)
@@ -210,9 +206,9 @@ if __name__ == '__main__':
     
     VAE = model.VAE(encoder, decoder).to(device)
     optimizer = torch.optim.Adam(VAE.parameters(), lr = learning_rate)
-    iteration = 150
+    iteration = 300
     epoch = 0
-    p0_iteration, p1_iteration = 50, 20
+    p0_iteration, p1_iteration = 60, 20
     loss_history = {'train':[], 'test':[]}
     
     try:
@@ -262,7 +258,8 @@ if __name__ == '__main__':
         #beta_VAE2 = beta_VAE
         beta_VAE2 = beta_VAE / beta_grow_round * (divmod(epoch, beta_grow_round)[1])
         for motions, root_ori, root_pos in train_loader:
-            gt = move01(motions)
+            gt = move_input_from01(motions.detach(),True)
+            gt = gt.detach()
             x = motions [:, 0, :]
 
             for i in range (1, clip_size):
@@ -273,6 +270,7 @@ if __name__ == '__main__':
                 k2 = slice(input_sizes[0]+predicted_sizes[1]-3, input_size, 1)
                 loss_re2 = loss_MSE(re_x[:, k1], gt[:, i, k1]) + loss_MSE(re_x[:, k2], gt[:, i, k2])
                 loss_re = loss_re1 * (1-beta_predict) + loss_re2 * beta_predict
+                #loss_re = torch.tensor(0)
                 loss_moe = 0
                 
                 moemoe, moemoepara = moe_output
@@ -293,9 +291,9 @@ if __name__ == '__main__':
                 optimizer.step()
                 
                 if (random.random() < teacher_p):
-                    x = motions[:, i, :]
+                    x = motions[:, i, :].detach()
                 else:
-                    x = move_input_to01(re_x.detach(), motions_max, motions_min, translations_max, translations_min, input_sizes[0])
+                    x = move_input_to01(re_x.detach(),True).detach()
                 
                 
             train_nsample += batch_size * (clip_size - 1)
@@ -357,10 +355,8 @@ if __name__ == '__main__':
                     'input_sizes': input_sizes,\
                     'predicted_size': predicted_size,\
                     'predicted_sizes': predicted_sizes,\
-                    'motions_min': motions_min,\
-                    'motions_max': motions_max,\
-                    'translations_min': translations_min,\
-                    'translations_max': translations_max,\
+                    'inputs_std': inputs_std,\
+                    'inputs_avg': inputs_avg,\
                     }
         torch.save(state, output_path+'/final_model.pth')
         print ("iteration %d/%d, train_loss: %f, test_loss: %f", epoch, iteration, train_loss/train_nsample,\

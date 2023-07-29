@@ -28,10 +28,12 @@ if __name__ == '__main__':
     predicted_size = checkpoint['predicted_size']
     predicted_sizes = checkpoint['predicted_sizes']
     
-    translations_max = checkpoint["translations_max"]
-    translations_min = checkpoint["translations_min"]
-    motions_max = checkpoint["motions_max"]
-    motions_min = checkpoint["motions_min"]
+    train.inputs_std = checkpoint["inputs_std"]
+    train.inputs_avg = checkpoint["inputs_avg"]
+    train.inputs_avg_gpu, train.inputs_std_gpu =\
+        torch.tensor(train.inputs_avg).to(torch.float32).detach().to(device), \
+        torch.tensor(train.inputs_std).to(torch.float32).detach().to(device)
+
     
     
     bvh = BVHLoader.load (data_path).sub_sequence(514,516)
@@ -47,10 +49,8 @@ if __name__ == '__main__':
     
     
     motions, translations, root_info = train.transform_bvh(bvh)
-    print(motions.shape, translations.shape)
-    motions = (motions - motions_min) / (motions_max - motions_min)
-    translations = (translations - translations_min) / (translations_max - translations_min)
     inputs = np.concatenate ([motions, translations], axis = 1)
+    inputs = train.move_input_to01(inputs)
     
     
     encoder = model.VAE_encoder (input_size, used_motions, h1, h2, latent_size)
@@ -84,7 +84,7 @@ if __name__ == '__main__':
         x = x.numpy()
         re_x = re_x.detach().numpy()
         
-        x,= train.move_input_from01 (x, motions_max, motions_min, translations_max, translations_min, input_sizes[0]),
+        x,= train.move_input_from01 (x),
           #      ,train.move_input_from01(re_x, motions_max, motions_min, translations_max, translations_min, input_sizes[0])
                 
    
@@ -97,11 +97,9 @@ if __name__ == '__main__':
         #different methods
         #bd = bvh.sub_sequence(0,-1)
         #bd.append_trans_rotation (np.asarray([jt_b, jt]), np.asarray([jr_b, jr]))
-        motions, translations, root_info = train.transform_bvh(bvh)
-        print(motions.shape, translations.shape)
-        motions = (motions - motions_min) / (motions_max - motions_min)
-        translations = (translations - translations_min) / (translations_max - translations_min)
+        motions, translations, root_info = train.transform_bvh(bvh, bvh.num_frames-1)
         inputs = np.concatenate ([motions, translations], axis = 1)
+        inputs = move_input_to01(inputs)
         x = torch.from_numpy (inputs[-1])
         x = x.reshape([1] + list(x.shape))
         
