@@ -53,6 +53,7 @@ def transform_bvh (jt, jr):
     global JRS
     JRS = jr.shape
     jrn, rts =[], []
+    extra_info = []
     for i in range(JRS[0]):
         jrnn=[]
         rts.append(np.concatenate([
@@ -65,7 +66,20 @@ def transform_bvh (jt, jr):
             jp[i][j]=rot.inv().apply(jp[i][j])
             jrnn.append(matrix_to_r6(R(jo[i,j]).as_matrix()).numpy())
         jrn.append(np.stack(jrnn, axis=0))
-    return np.transpose(np.concatenate ([np.asarray(rts),np.asarray(jrn).reshape(JRS[0], -1), jp.reshape(JRS[0], -1)], axis=-1), (1, 0))
+        
+        extra_info1 = []
+        #extra_info1.append(matrix_to_r6(R(jo[i][0]).as_matrix()).numpy()*10)
+        for j in [4,5,9,10]:#feet
+            extra_info1.append(jp[i][j])
+        for j in [4,5,9,10]:#feet
+            extra_info1.append(jp[i][j])
+            
+        extra_info.append(np.concatenate(extra_info1,axis=-1))
+        
+    return np.transpose(np.concatenate ([np.asarray(rts),\
+        np.asarray(jrn).reshape(JRS[0], -1),\
+            jp.reshape(JRS[0], -1),\
+                np.asarray(extra_info).reshape(JRS[0], -1)], axis=-1), (1, 0))
 
 def transform_output (output):
     output = output.transpose(1, 0)
@@ -99,7 +113,7 @@ def calc_root_ori(root_ori, angular_velocity, bvh):
 def get_initial(length, inputs):
     initial_motion = torch.randn((inputs[0].shape[0], length))
     for input in inputs: 
-        initial_motion += F.interpolate(torch.tensor(input).unsqueeze(0),\
+        initial_motion += 0*F.interpolate(torch.tensor(input).unsqueeze(0),\
             size=length, mode='linear', align_corners=False).squeeze(0).numpy()
     return torch.fmod(initial_motion, 1.0)
 
@@ -160,8 +174,8 @@ if __name__ == '__main__':
     
     
     BVH = BVHLoader.load (data_path)
-    BVH = BVH.resample(60)
-    samples = [(400,1000), (5000,5600), (8000,8600),(9000,9600), (4100,4700)]
+    BVH = BVH.resample(30)
+    samples = [(400,800), (5000,5400), (1000,1400), (4100,4500)]
     inputs = []
     for i,(start,end) in enumerate(samples):
         bvh = BVH.sub_sequence(start, end, copy=True)
@@ -197,31 +211,31 @@ if __name__ == '__main__':
             [20,21,22,23,24]]
     
     
-    initial_length, final_length, ratio = 60, 1000, 0.75
-    output = get_initial (initial_length, inputs)
-    
-    while output.shape[1] < final_length:
-        length = output.shape[1]
-        target_length = round(length/ratio)
-        if(target_length == length):
-            target_length += 1
+    for shots in range(0,   1):
+        initial_length, final_length, ratio = 60, 400, 0.75
+        output = get_initial (initial_length, inputs)
         
-        output = F.interpolate(torch.tensor(output).unsqueeze(0),\
-            size=target_length, mode='linear', align_corners=False).squeeze(0).numpy()
-        print(output.shape)
-        for i in range(3):
-            output = transform(output, inputs, target_length, naiveDistance, naiveBlend)
-    
-    
-    for shots in range(0,5):
-        sp = BVH.num_frames
-        #output = move_input_from01(output)
-        jr, jt = transform_output(output)
-        jt = start_from_0(jt)
-        print(np.asarray(jt).shape,np.asarray(jr).shape)
-        BVH.append_trans_rotation(np.asarray(jt), np.asarray(jr))
+        while output.shape[1] < final_length:
+            length = output.shape[1]
+            target_length = round(length/ratio)
+            if(target_length == length):
+                target_length += 1
+            
+            output = F.interpolate(torch.tensor(output).unsqueeze(0),\
+                size=target_length, mode='linear', align_corners=False).squeeze(0).numpy()
+            print(output.shape)
+            for i in range(3):
+                output = transform(output, inputs, target_length, naiveDistance, naiveBlend)
         
-        BVHLoader.save(BVH.sub_sequence(sp, BVH.num_frames), './infered'+str(shots)+'.bvh')
-    
-    
+        
+            sp = BVH.num_frames
+            #output = move_input_from01(output)
+            jr, jt = transform_output(output)
+            jt = start_from_0(jt)
+            print(np.asarray(jt).shape,np.asarray(jr).shape)
+            BVH.append_trans_rotation(np.asarray(jt), np.asarray(jr))
+            
+            BVHLoader.save(BVH.sub_sequence(sp, BVH.num_frames), './infered'+str(shots)+'withoutroot.bvh')
+        
+        
     os.system("python -m pymotionlib.editor")
