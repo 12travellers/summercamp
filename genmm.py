@@ -15,6 +15,7 @@ data_path = "./walk1_subject5.bvh"
 
 inputs_avg = None
 inputs_std = None
+BVH = None
 
 def matrix_to_r6(matrix: torch.Tensor) -> torch.Tensor:
     matrix = torch.tensor(matrix)
@@ -45,37 +46,47 @@ def move_input_from01(x):
 
 
 JRS = None
+BS = None
 def transform_bvh (jt, jr):
+    jp, jo = None, None
+    jp, jo = BVH.compute_joint_global_info(jt,jr,jp,jo)
     global JRS
     JRS = jr.shape
-    jrn=[]
+    jrn, rts =[], []
     for i in range(JRS[0]):
         jrnn=[]
-        rot = R(jr[i][0])
-        for j in range(JRS[1]):
-            if(j!=0):
-                jr[i][j]=(rot.inv()*R(jr[i][j])).as_quat()
-                jt[i][j]-=jt[i][0]
-            jrnn.append(matrix_to_r6(R(jr[i,j]).as_matrix()).numpy())
+        rts.append(np.concatenate([
+                   matrix_to_r6(R(jo[i][0]).as_matrix()).numpy(),
+                    jp[i][0]-(jp[i-1][0] if i>0 else 0)],axis=-1))
+        rot = R(jo[i][0])
+        for j in range(1, JRS[1]):
+            jo[i][j]=(rot.inv()*R(jo[i][j])).as_quat()
+            jp[i][j]-=jp[i][0]
+            jp[i][j]=rot.inv().apply(jp[i][j])
+            jrnn.append(matrix_to_r6(R(jo[i,j]).as_matrix()).numpy())
         jrn.append(np.stack(jrnn, axis=0))
-    
-    print(np.asarray(jrn).shape)
-    return np.concatenate ([np.asarray(jrn), jt], axis=-1)
+    return np.transpose(np.concatenate ([np.asarray(rts),np.asarray(jrn).reshape(JRS[0], -1), jp.reshape(JRS[0], -1)], axis=-1), (1, 0))
+
 def transform_output (output):
-    jrnn, jt = output[:, :, :6],output[:, :, 6:]
-    jr = []
-    for i in range(jrnn.shape[0]):
-        jrn = []
-        rot = None
-        for j in range(JRS[1]):
-            q = R.from_matrix(r6_to_matrix(jrnn[i,j,:]).numpy()).as_quat()
-            if(j!=0):
-                jt[i][j]+=jt[i][0]
-                q=(rot*R(q)).as_quat()
-            else:
-                rot = R(q)
-            jrn.append(q)
-        jr.append(np.stack(jrn, axis=0))
+    output = output.transpose(1, 0)
+    jp, jo = [], []
+    for i in range(output.shape[0]):
+        jp.append([])
+        jo.append([])
+        rot = R.from_matrix(r6_to_matrix(output[i,:6]).numpy())
+        jo[i].append(rot.as_quat())
+        output[i,6:9]+=(output[i-1,6:9] if i>0 else 0)
+        jp[i].append(output[i,6:9])
+        for j in range(0,JRS[1]-1):
+            q = R.from_matrix(r6_to_matrix(output[i,9+j*6:15+j*6]).numpy()).as_quat()
+            q=(rot*R(q)).as_quat()
+            jo[i].append(q)
+        another = (JRS[1]-1)*6+9
+        for j in range(0,JRS[1]-1):
+            p = output[i,another+j*3:another+3+j*3]
+            jp[i].append(rot.apply(p+jp[i][0]))
+    jt, jr = None, None      
+    jt, jr = BVH.compute_joint_local_info(np.asarray(jp), np.asarray(jo), jt, jr)
     return jr,jt
 
 def calc_root_ori(root_ori, angular_velocity, bvh):
@@ -86,50 +97,60 @@ def calc_root_ori(root_ori, angular_velocity, bvh):
     return v
 
 def get_initial(length, inputs):
-    initial_motion = torch.randn((length, inputs[0].shape[1], inputs[0].shape[2]))
-    #initial_motion += F.interpolate(torch.tensor(inputs[0]) ,size = length, mode='linear', align_corners=True)
+    initial_motion = torch.randn((inputs[0].shape[0], length))
+    for input in inputs: 
+        initial_motion += F.interpolate(torch.tensor(input).unsqueeze(0),\
+            size=length, mode='linear', align_corners=False).squeeze(0).numpy()
     return torch.fmod(initial_motion, 1.0)
 
 def extract_patches(x, patch_size=7, stride=1):
-    assert(len(x.shape) == 3) #[frames, joints, representations]
-    b, c, d = x.shape
-    x_patches = unfoldNd.unfoldNd(torch.tensor(x).permute(1,2,0), kernel_size=patch_size, stride=stride).permute(2,0,1).numpy()
-    return x_patches.reshape(b-patch_size+1,-1), x_patches.reshape(b-patch_size+1,-1,c*patch_size)
+    assert(len(x.shape) == 2) #[representations, frames]
+    b, c = x.shape
+    x_patches = unfoldNd.unfoldNd(torch.tensor(x).unsqueeze(0), kernel_size=patch_size, stride=stride).squeeze(0).numpy()
+    x_patches = x_patches.transpose(1,0)
+    print(x.shape, x_patches.shape)
+    assert(x_patches.shape[1]==patch_size * b)
+    return x_patches #[whatever, patch_size * frames]
 
 def naiveDistance(x, y):
-    return np.sum((extract_patches(x)[0]-extract_patches(y)[0])**2,axis=-1), extract_patches(y)[1]
+    return np.sum((x-y)**2,axis=-1)
 def naiveBlend(output, ys, patch_size=7, stride=1):
-    b, c, d = output.shape
-    print(b,c,d)
-    ys=np.asarray(ys).reshape(b-patch_size+1, c, patch_size*d)
-    print(torch.Tensor(ys).permute(1,2,0).shape)
-    combined = unfoldNd.foldNd(torch.Tensor(ys).permute(1,2,0), output_size=(b,), kernel_size=patch_size, stride=stride)
+    b, c = output.shape #[representations, frames]
+    ys = ys.transpose(1,0)
+    print("blending on:",b,c,ys.shape)
+    combined = unfoldNd.foldNd(torch.Tensor(ys).unsqueeze(0), output_size=(c,),\
+        kernel_size=patch_size, stride=stride)
     print(combined.shape)
     input_ones = torch.ones_like(combined, dtype=torch.tensor(ys).dtype)
     divisor = unfoldNd.unfoldNd(input_ones, kernel_size=patch_size, stride=stride)
-    divisor = unfoldNd.foldNd(divisor, output_size=(b,), kernel_size=patch_size, stride=stride)
-    print(divisor.shape)
-    return (combined / divisor).permute(2,0,1).numpy()
+    divisor = unfoldNd.foldNd(divisor, output_size=(c,), kernel_size=patch_size, stride=stride)
+    
+    return (combined / divisor).squeeze(0).numpy()
     
     
 def transform(output, inputs, length, distance, blend):
-    distances, patches = [], []
-    for i in range(len(inputs)):#[frames, joints, representations]
-        input = F.interpolate(torch.tensor(inputs[i]).permute(1,2,0), size=length,\
-            mode='linear', align_corners=False).permute(2,0,1).numpy()
-        
-        dist, patch = distance(output, input)
-        assert(len(dist.shape)==1)
-        distances.append(dist)
-        patches.append(patch)
-    distances, patches = np.stack(distances, axis=0), np.stack(patches, axis=0)
-    print(distances.shape, patches.shape)
-    nearest = list(enumerate(np.argmin(distances.transpose(1,0), axis=1)))
-    print(patches.shape)
-    print(nearest)
-    #debug
-    return blend(output, [patches[j,i] for (i,j) in nearest])
+    print("-----trans---------")
+    print(output.shape, length)
+    patches = []
+    for i in range(len(inputs)):#[representations, frames]
+        input = F.interpolate(torch.tensor(inputs[i]).unsqueeze(0), size=length,\
+            mode='linear', align_corners=False).squeeze(0).numpy()
+        patches.append(extract_patches(input)) #[whatever, patch_size * frames]
     
+    patches = np.concatenate(patches, axis=0)
+    xs = extract_patches(output)
+    nearest = []
+    for i in range(xs.shape[0]):
+        j = np.argmin([distance(xs[i], patches[j]) for j in range(patches.shape[0])])
+        nearest.append(j)
+    
+    return blend(output, patches[nearest])
+
+def start_from_0(x):
+    return x
+    ds = x[0, 0, :].copy()
+    x[:, :, :] -= ds
+    return x
 if __name__ == '__main__':
     
     make_new = False
@@ -139,16 +160,17 @@ if __name__ == '__main__':
     
     
     BVH = BVHLoader.load (data_path)
-    samples = [(400,1400),(2000,3000),(3200,4200),(6700,7700)]
+    BVH = BVH.resample(60)
+    samples = [(400,1000), (5000,5600), (8000,8600),(9000,9600), (4100,4700)]
     inputs = []
     for i,(start,end) in enumerate(samples):
-        bvh = BVH.sub_sequence(start, end)
+        bvh = BVH.sub_sequence(start, end, copy=True)
+        #bvh._joint_translation = start_from_0(bvh._joint_translation)
         print("selectivly read " + str(bvh.num_frames) + " motions from " + data_path)
-        input = transform_bvh(bvh._joint_translation, bvh._joint_rotation)
+        input = transform_bvh(bvh._joint_translation.copy(), bvh._joint_rotation.copy())
         print(input.shape)
         
         inputs.append(input)
-        print(input)
         BVHLoader.save(bvh, './sample'+str(i)+'.bvh')
         
     
@@ -175,28 +197,31 @@ if __name__ == '__main__':
             [20,21,22,23,24]]
     
     
-    initial_length, final_length, ratio = 100, 1000, 0.7
+    initial_length, final_length, ratio = 60, 1000, 0.75
     output = get_initial (initial_length, inputs)
-
-    while output.shape[0] < final_length:
-        length = output.shape[0]
+    
+    while output.shape[1] < final_length:
+        length = output.shape[1]
         target_length = round(length/ratio)
         if(target_length == length):
             target_length += 1
-            
-        output = F.interpolate(torch.tensor(output).permute(1,2,0),\
-            size=target_length, mode='linear', align_corners=False).permute(2,0,1).numpy()
-
-        for i in range(2):
+        
+        output = F.interpolate(torch.tensor(output).unsqueeze(0),\
+            size=target_length, mode='linear', align_corners=False).squeeze(0).numpy()
+        print(output.shape)
+        for i in range(3):
             output = transform(output, inputs, target_length, naiveDistance, naiveBlend)
     
-    sp = BVH.num_frames
-    #output = move_input_from01(output)
-    jr, jt = transform_output(output)
-    print(np.asarray(jt).shape,np.asarray(jr).shape)
-    BVH.append_trans_rotation(np.asarray(jt), np.asarray(jr))
     
-    BVHLoader.save(BVH.sub_sequence(sp, BVH.num_frames), './infered.bvh')
+    for shots in range(0,5):
+        sp = BVH.num_frames
+        #output = move_input_from01(output)
+        jr, jt = transform_output(output)
+        jt = start_from_0(jt)
+        print(np.asarray(jt).shape,np.asarray(jr).shape)
+        BVH.append_trans_rotation(np.asarray(jt), np.asarray(jr))
+        
+        BVHLoader.save(BVH.sub_sequence(sp, BVH.num_frames), './infered'+str(shots)+'.bvh')
     
     
     os.system("python -m pymotionlib.editor")
